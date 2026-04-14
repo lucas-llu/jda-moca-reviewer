@@ -1,7 +1,14 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+
+let diagnosticCollection: vscode.DiagnosticCollection;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Code Reviewer extension is now active!');
+
+    diagnosticCollection = vscode.languages.createDiagnosticCollection('code-reviewer');
+    context.subscriptions.push(diagnosticCollection);
 
     const reviewFileCommand = vscode.commands.registerCommand(
         'code-reviewer.reviewFile',
@@ -18,6 +25,8 @@ export function activate(context: vscode.ExtensionContext) {
                 vscode.window.showInformationMessage('This extension only reviews .mcmd files');
                 return;
             }
+
+            diagnosticCollection.clear();
 
             const issues = await performMcmdReview(document);
 
@@ -37,6 +46,8 @@ export function activate(context: vscode.ExtensionContext) {
                 vscode.window.showInformationMessage('No workspace folder found');
                 return;
             }
+
+            diagnosticCollection.clear();
 
             const files = await vscode.workspace.findFiles('**/*.mcmd');
             const allIssues: McmdIssue[] = [];
@@ -72,37 +83,113 @@ async function performMcmdReview(document: vscode.TextDocument): Promise<McmdIss
     const text = document.getText();
     const fileName = document.fileName;
     const baseName = fileName.split(/[/\\]/).pop() || '';
-    const commandName = baseName.replace('.mcmd', '');
+    const fileNameNoExt = baseName.replace('.mcmd', '');
 
     issues.push(...checkFileStructure(text, fileName));
 
     const nameMatch = text.match(/<name>([\s\S]*?)<\/name>/i);
     if (nameMatch) {
         const nameContent = nameMatch[1].trim();
-
-        issues.push(...checkNameMatchesFile(nameContent, commandName, fileName));
-
+        issues.push(...checkNameMatchesFile(nameContent, fileNameNoExt, fileName));
         issues.push(...checkNameContainsLc(nameContent, fileName));
     }
 
     const localSyntaxMatch = text.match(/<local-syntax>[\s\S]*?<!\[CDATA\[([\s\S]*?)\]\]>/i);
     if (localSyntaxMatch) {
-        const sqlCode = localSyntaxMatch[1];
+        let sqlCode = localSyntaxMatch[1];
+        sqlCode = removeComments(sqlCode);
 
         const nameMatch = text.match(/<name>([\s\S]*?)<\/name>/i);
         const nameContent = nameMatch ? nameMatch[1].trim() : '';
 
         issues.push(...checkComplexSql(sqlCode, nameContent, fileName));
-
         issues.push(...checkInsertUpdateDelete(sqlCode, nameContent, fileName));
-
         issues.push(...checkInClause(sqlCode, fileName));
-
         issues.push(...checkSubSelectInSelectClause(sqlCode, fileName));
-
         issues.push(...checkDivisionWithDecode(sqlCode, fileName));
-
         issues.push(...checkListGetNoDml(sqlCode, nameContent, fileName));
+    }
+
+    return issues;
+}
+
+function removeComments(code: string): string {
+    let result = code;
+    result = result.replace(/\/\*[\s\S]*?\*\//g, '');
+    result = result.replace(/--.*$/gm, '');
+    return result;
+}
+
+function checkNameNoUpperCase(nameContent: string, file: string): McmdIssue[] {
+    const issues: McmdIssue[] = [];
+
+    if (/[A-Z]/.test(nameContent)) {
+        const upperChars = nameMatch[1].match(/[A-Z]/g) || [];
+        issues.push({
+            file,
+            line: 1,
+            column: 1,
+            severity: vscode.DiagnosticSeverity.Error,
+            message: `<name> tag must not contain uppercase characters. Found: ${[...new Set(upperChars)].join(', ')}`,
+            rule: 'name-no-uppercase'
+        });
+    }
+
+    if (nameContent.includes('  ')) {
+        issues.push({
+            file,
+            line: 1,
+            column: 1,
+            severity: vscode.DiagnosticSeverity.Error,
+            message: `<name> tag must not have multiple consecutive spaces. Only one space between words`,
+            rule: 'name-multiple-spaces'
+        });
+    }
+
+    return issues;
+}
+
+function getActualFileName(fullPath: string): string {
+    const baseName = path.basename(fullPath);
+    try {
+        const dirPath = path.dirname(fullPath);
+        const files = fs.readdirSync(dirPath);
+        const actualFile = files.find(f => f.toLowerCase() === baseName.toLowerCase());
+        return actualFile || baseName;
+    } catch {
+        return baseName;
+    }
+}
+
+function checkFileNameNoUpperCase(fullPath: string): McmdIssue[] {
+    const issues: McmdIssue[] = [];
+
+    const actualFileName = getActualFileName(fullPath);
+
+    for (let i = 0; i < actualFileName.length; i++) {
+        const char = actualFileName[i];
+        if (char >= 'A' && char <= 'Z') {
+            issues.push({
+                file: fullPath,
+                line: 1,
+                column: 1,
+                severity: vscode.DiagnosticSeverity.Error,
+                message: `File name must not contain uppercase characters. Found: '${char}'`,
+                rule: 'filename-no-uppercase'
+            });
+            break;
+        }
+    }
+
+    if (actualFileName.includes(' ')) {
+        issues.push({
+            file: fullPath,
+            line: 1,
+            column: 1,
+            severity: vscode.DiagnosticSeverity.Error,
+            message: `File name must not contain spaces. Use underscore '_' instead`,
+            rule: 'filename-no-space'
+        });
     }
 
     return issues;
@@ -121,7 +208,11 @@ function checkFileStructure(text: string, file: string): McmdIssue[] {
             message: 'Missing <name> tag in .mcmd file',
             rule: 'missing-name'
         });
+    } else {
+        issues.push(...checkNameNoUpperCase(nameMatch[1], file));
     }
+
+    issues.push(...checkFileNameNoUpperCase(file));
 
     const descriptionMatch = text.match(/<description>([\s\S]*?)<\/description>/i);
     if (!descriptionMatch) {
@@ -147,8 +238,11 @@ function checkFileStructure(text: string, file: string): McmdIssue[] {
         });
     }
 
+    const typeMatch = text.match(/<type>([\s\S]*?)<\/type>/i);
+    const isJavaMethod = typeMatch && typeMatch[1].trim().toLowerCase() === 'java method';
+
     const localSyntaxMatch = text.match(/<local-syntax>[\s\S]*?<!\[CDATA\[([\s\S]*?)\]\]>/i);
-    if (!localSyntaxMatch) {
+    if (!localSyntaxMatch && !isJavaMethod) {
         issues.push({
             file,
             line: 1,
@@ -162,17 +256,18 @@ function checkFileStructure(text: string, file: string): McmdIssue[] {
     return issues;
 }
 
-function checkNameMatchesFile(nameContent: string, fileName: string, file: string): McmdIssue[] {
+function checkNameMatchesFile(nameContent: string, fileNameNoExt: string, file: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const expectedName = nameContent.toLowerCase().replace(/\s+/g, '_');
 
-    if (fileName.toLowerCase() !== expectedName) {
+    const nameWithUnderscore = nameContent.replace(/\s+/g, '_');
+
+    if (nameWithUnderscore !== fileNameNoExt) {
         issues.push({
             file,
             line: 1,
             column: 1,
             severity: vscode.DiagnosticSeverity.Warning,
-            message: `Name '${nameContent}' does not match filename. Expected: '${nameContent.replace(/\s+/g, '_')}'`,
+            message: `Name '${nameContent}' does not match filename '${fileNameNoExt}'`,
             rule: 'name-mismatch'
         });
     }
@@ -182,11 +277,11 @@ function checkNameMatchesFile(nameContent: string, fileName: string, file: strin
 
 function checkNameContainsLc(nameContent: string, file: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const lowerName = nameContent.toLowerCase();
+    const lowerName = nameContent;
 
     const firstSpaceIndex = lowerName.indexOf(' ');
-    if (firstSpaceIndex > 0 && firstSpaceIndex < lowerName.length - 1) {
-        const afterFirstSpace = lowerName.substring(firstSpaceIndex + 1);
+    if (firstSpaceIndex > 0 && firstSpaceIndex < nameContent.length - 1) {
+        const afterFirstSpace = nameContent.substring(firstSpaceIndex + 1);
         if (!afterFirstSpace.includes('lc ')) {
             issues.push({
                 file,
@@ -204,11 +299,11 @@ function checkNameContainsLc(nameContent: string, file: string): McmdIssue[] {
 
 function checkComplexSql(sqlCode: string, commandName: string, file: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const lowerName = commandName.toLowerCase();
+    const lowerName = commandName;
     const isListOrGet = lowerName.startsWith('list ') || lowerName.startsWith('get ');
 
     const selectCount = (sqlCode.match(/\bselect\b/gi) || []).length;
-    if (selectCount > 1) {
+    if (selectCount > 2) {
         if (!isListOrGet) {
             issues.push({
                 file,
@@ -254,7 +349,7 @@ function checkComplexSql(sqlCode: string, commandName: string, file: string): Mc
     const tables: string[] = [];
     let match;
     while ((match = tablePattern.exec(sqlCode)) !== null) {
-        tables.push(match[1].toLowerCase());
+        tables.push(match[1]);
     }
     const uniqueTables = new Set(tables);
     if (uniqueTables.size > 2) {
@@ -326,21 +421,21 @@ function checkInClause(sqlCode: string, file: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
     const lines = sqlCode.split('\n');
 
-    const inPattern = /\bin\s*\(/gi;
+    const inWithSelectPattern = /\bin\s*\(\s*select\b/gi;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lineNumber = i + 1;
 
         let match;
-        while ((match = inPattern.exec(line)) !== null) {
+        while ((match = inWithSelectPattern.exec(line)) !== null) {
             issues.push({
                 file,
                 line: lineNumber,
                 column: match.index + 1,
                 severity: vscode.DiagnosticSeverity.Error,
-                message: 'Use EXISTS instead of IN clause',
-                rule: 'no-in-clause'
+                message: 'Use EXISTS instead of IN (subquery) clause',
+                rule: 'no-in-subquery'
             });
         }
     }
@@ -407,7 +502,7 @@ function checkDivisionWithDecode(sqlCode: string, file: string): McmdIssue[] {
 
 function checkListGetNoDml(sqlCode: string, commandName: string, file: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const lowerName = commandName.toLowerCase();
+    const lowerName = commandName;
     const isListOrGet = lowerName.startsWith('list ') || lowerName.startsWith('get ');
 
     if (isListOrGet) {
@@ -460,7 +555,7 @@ function checkListGetNoDml(sqlCode: string, commandName: string, file: string): 
 }
 
 function showIssuesInProblemsPanel(issues: McmdIssue[]): void {
-    const diagnosticCollection = vscode.languages.createDiagnosticCollection('code-reviewer');
+    diagnosticCollection.clear();
 
     const issuesByFile = new Map<string, vscode.Diagnostic[]>();
 
@@ -489,4 +584,8 @@ function showIssuesInProblemsPanel(issues: McmdIssue[]): void {
     vscode.window.showInformationMessage(`Found ${issues.length} issues in .mcmd files. Check the Problems panel.`);
 }
 
-export function deactivate() {}
+export function deactivate() {
+    if (diagnosticCollection) {
+        diagnosticCollection.clear();
+    }
+}
