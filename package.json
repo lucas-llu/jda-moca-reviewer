@@ -1,0 +1,58 @@
+{
+  "name": "code-reviewer",
+  "displayName": "Code Reviewer",
+  "description": "A VSCode extension for reviewing code content, format, and style",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:code-reviewer.reviewFile",
+    "onCommand:code-reviewer.reviewProject"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "code-reviewer.reviewFile",
+        "title": "Code Reviewer: Review Current File"
+      },
+      {
+        "command": "code-reviewer.reviewProject",
+        "title": "Code Reviewer: Review Project"
+      }
+    ],
+    "configuration": {
+      "title": "Code Reviewer",
+      "properties": {
+        "codeReviewer.enableAutoReview": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable automatic code review on file save"
+        },
+        "codeReviewer.reviewOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Review code when file is opened"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.0"
+  }
+}
