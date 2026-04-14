@@ -2,14 +2,17 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Global diagnostic collection for storing and displaying code issues
 let diagnosticCollection: vscode.DiagnosticCollection;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Code Reviewer extension is now active!');
 
+    // Create a diagnostic collection for storing issues
     diagnosticCollection = vscode.languages.createDiagnosticCollection('code-reviewer');
     context.subscriptions.push(diagnosticCollection);
 
+    // Register command for reviewing a single file
     const reviewFileCommand = vscode.commands.registerCommand(
         'code-reviewer.reviewFile',
         async () => {
@@ -21,6 +24,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             const document = editor.document;
 
+            // Only process .mcmd files
             if (!document.fileName.endsWith('.mcmd')) {
                 vscode.window.showInformationMessage('This extension only reviews .mcmd files');
                 return;
@@ -38,6 +42,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
     );
 
+    // Register command for reviewing the entire project
     const reviewProjectCommand = vscode.commands.registerCommand(
         'code-reviewer.reviewProject',
         async () => {
@@ -49,6 +54,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             diagnosticCollection.clear();
 
+            // Find all .mcmd files in the workspace
             const files = await vscode.workspace.findFiles('**/*.mcmd');
             const allIssues: McmdIssue[] = [];
 
@@ -97,21 +103,24 @@ async function performMcmdReview(document: vscode.TextDocument): Promise<McmdIss
     const localSyntaxMatch = text.match(/<local-syntax>[\s\S]*?<!\[CDATA\[([\s\S]*?)\]\]>/i);
     if (localSyntaxMatch) {
         let sqlCode = localSyntaxMatch[1];
+        const cdataStart = text.indexOf('<![CDATA[');
+        const linesBeforeSql = text.substring(0, cdataStart).split('\n').length;
         sqlCode = removeComments(sqlCode);
 
         const nameMatch = text.match(/<name>([\s\S]*?)<\/name>/i);
         const nameContent = nameMatch ? nameMatch[1].trim() : '';
 
-        issues.push(...checkComplexSql(sqlCode, nameContent, fileName));
-        issues.push(...checkInsertUpdateDelete(sqlCode, nameContent, fileName));
-        issues.push(...checkInClause(sqlCode, fileName));
-        issues.push(...checkSubSelectInSelectClause(sqlCode, fileName));
-        issues.push(...checkDivisionWithDecode(sqlCode, fileName));
+        issues.push(...checkComplexSql(sqlCode, nameContent, fileName, linesBeforeSql));
+        issues.push(...checkInsertUpdateDelete(sqlCode, nameContent, fileName, linesBeforeSql));
+        issues.push(...checkInClause(sqlCode, fileName, linesBeforeSql));
+        issues.push(...checkSubSelectInSelectClause(sqlCode, fileName, linesBeforeSql));
+        issues.push(...checkDivisionWithDecode(sqlCode, fileName, linesBeforeSql));
         issues.push(...checkListGetNoDml(sqlCode, nameContent, fileName));
     }
 
     return issues;
 }
+
 
 function removeComments(code: string): string {
     let result = code;
@@ -124,7 +133,7 @@ function checkNameNoUpperCase(nameContent: string, file: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
 
     if (/[A-Z]/.test(nameContent)) {
-        const upperChars = nameMatch[1].match(/[A-Z]/g) || [];
+        const upperChars = nameContent.match(/[A-Z]/g) || [];
         issues.push({
             file,
             line: 1,
@@ -238,7 +247,6 @@ function checkFileStructure(text: string, file: string): McmdIssue[] {
         });
     }
 
-    const typeMatch = text.match(/<type>([\s\S]*?)<\/type>/i);
     const isJavaMethod = typeMatch && typeMatch[1].trim().toLowerCase() === 'java method';
 
     const localSyntaxMatch = text.match(/<local-syntax>[\s\S]*?<!\[CDATA\[([\s\S]*?)\]\]>/i);
@@ -297,7 +305,7 @@ function checkNameContainsLc(nameContent: string, file: string): McmdIssue[] {
     return issues;
 }
 
-function checkComplexSql(sqlCode: string, commandName: string, file: string): McmdIssue[] {
+function checkComplexSql(sqlCode: string, commandName: string, file: string, lineOffset: number = 0): McmdIssue[] {
     const issues: McmdIssue[] = [];
     const lowerName = commandName;
     const isListOrGet = lowerName.startsWith('list ') || lowerName.startsWith('get ');
@@ -368,7 +376,7 @@ function checkComplexSql(sqlCode: string, commandName: string, file: string): Mc
     return issues;
 }
 
-function checkInsertUpdateDelete(sqlCode: string, commandName: string, file: string): McmdIssue[] {
+function checkInsertUpdateDelete(sqlCode: string, commandName: string, file: string, lineOffset: number = 0): McmdIssue[] {
     const issues: McmdIssue[] = [];
     const lines = sqlCode.split('\n');
 
@@ -383,7 +391,7 @@ function checkInsertUpdateDelete(sqlCode: string, commandName: string, file: str
         if (insertPattern.test(line)) {
             issues.push({
                 file,
-                line: lineNumber,
+                line: lineNumber + lineOffset,
                 column: line.indexOf('insert') + 1,
                 severity: vscode.DiagnosticSeverity.Warning,
                 message: `Avoid using INSERT in command '${commandName}'`,
@@ -394,7 +402,7 @@ function checkInsertUpdateDelete(sqlCode: string, commandName: string, file: str
         if (updatePattern.test(line)) {
             issues.push({
                 file,
-                line: lineNumber,
+                line: lineNumber + lineOffset,
                 column: line.indexOf('update') + 1,
                 severity: vscode.DiagnosticSeverity.Warning,
                 message: `Avoid using UPDATE in command '${commandName}'`,
@@ -405,7 +413,7 @@ function checkInsertUpdateDelete(sqlCode: string, commandName: string, file: str
         if (deletePattern.test(line)) {
             issues.push({
                 file,
-                line: lineNumber,
+                line: lineNumber + lineOffset,
                 column: line.indexOf('delete') + 1,
                 severity: vscode.DiagnosticSeverity.Warning,
                 message: `Avoid using DELETE in command '${commandName}'`,
@@ -417,7 +425,7 @@ function checkInsertUpdateDelete(sqlCode: string, commandName: string, file: str
     return issues;
 }
 
-function checkInClause(sqlCode: string, file: string): McmdIssue[] {
+function checkInClause(sqlCode: string, file: string, lineOffset: number = 0): McmdIssue[] {
     const issues: McmdIssue[] = [];
     const lines = sqlCode.split('\n');
 
@@ -431,7 +439,7 @@ function checkInClause(sqlCode: string, file: string): McmdIssue[] {
         while ((match = inWithSelectPattern.exec(line)) !== null) {
             issues.push({
                 file,
-                line: lineNumber,
+                line: lineNumber + lineOffset,
                 column: match.index + 1,
                 severity: vscode.DiagnosticSeverity.Error,
                 message: 'Use EXISTS instead of IN (subquery) clause',
@@ -443,7 +451,7 @@ function checkInClause(sqlCode: string, file: string): McmdIssue[] {
     return issues;
 }
 
-function checkSubSelectInSelectClause(sqlCode: string, file: string): McmdIssue[] {
+function checkSubSelectInSelectClause(sqlCode: string, file: string, lineOffset: number = 0): McmdIssue[] {
     const issues: McmdIssue[] = [];
     const lines = sqlCode.split('\n');
 
@@ -459,7 +467,7 @@ function checkSubSelectInSelectClause(sqlCode: string, file: string): McmdIssue[
             if (/\(select\s+/i.test(selectClause)) {
                 issues.push({
                     file,
-                    line: lineNumber,
+                    line: lineNumber + lineOffset,
                     column: 1,
                     severity: vscode.DiagnosticSeverity.Error,
                     message: 'Sub-select is not allowed in SELECT clause',
@@ -472,25 +480,38 @@ function checkSubSelectInSelectClause(sqlCode: string, file: string): McmdIssue[
     return issues;
 }
 
-function checkDivisionWithDecode(sqlCode: string, file: string): McmdIssue[] {
+function checkDivisionWithDecode(sqlCode: string, file: string, lineOffset: number = 0): McmdIssue[] {
     const issues: McmdIssue[] = [];
     const lines = sqlCode.split('\n');
 
-    const divisionPattern = /\/\s*(@?\w+|\d+)/g;
+    const divisionPattern = /\s\/\s*@?(\w+\.\w+|\w+)/g;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lineNumber = i + 1;
 
-        const hasDivision = divisionPattern.test(line);
-        if (hasDivision) {
-            if (!/decode\s*\(/i.test(line)) {
+        let match;
+        while ((match = divisionPattern.exec(line)) !== null) {
+            const divisionText = match[0].trim();
+            const divisor = divisionText.substring(1).trim();
+
+            const isConstantDivision = /^\d+\.?\d*$/.test(divisor);
+            if (isConstantDivision) {
+                continue;
+            }
+
+            const beforeDivision = line.substring(0, match.index);
+            const divisorWithoutAt = divisor.replace(/^@/, '');
+
+            const hasDecodeProtection = new RegExp(`decode\\s*\\(\\s*@?${divisorWithoutAt}\\s*,\\s*0\\s*,\\s*0\\s*,`, 'i').test(beforeDivision);
+
+            if (!hasDecodeProtection) {
                 issues.push({
                     file,
-                    line: lineNumber,
-                    column: line.indexOf('/') + 1,
+                    line: lineNumber + lineOffset,
+                    column: match.index + 1,
                     severity: vscode.DiagnosticSeverity.Warning,
-                    message: 'Division operation should use DECODE function to handle divide by zero',
+                    message: 'Division by variable should check for zero using DECODE',
                     rule: 'division-decode'
                 });
             }
