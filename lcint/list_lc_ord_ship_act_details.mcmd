@@ -1,0 +1,58 @@
+<command>
+<name>list lc ord ship act details</name>
+<description>list lc ord ship act details</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+/* No existing MOCA list command, use select statement instead.
+ * Retrieve data from some tables directly since there is no view for these tables.
+ */
+[select distinct shl.ship_id,
+        ord.ordnum,
+        ord.wh_id,
+        ord.client_id,
+        ord.btcust,
+        ord.rtcust,
+        ord.stcust,
+        ord.cponum,
+        ord.ordtyp,
+        ord.dlvnum,
+        ord.dlvseq,
+        ord.cpotyp,
+        ord.cpodte,
+        ord.paytrm,
+        ord.dlv_contact,
+        ord.rush_flg,
+        ord.cstms_ordtyp,
+        ord.srv_type,
+        @order_status order_status
+   from ord
+   left
+   join shipment_line shl
+     on ord.client_id = shl.client_id
+    and ord.ordnum = shl.ordnum
+    and ord.wh_id = shl.wh_id
+    and shl.linsts <> 'B'
+  where ord.ordnum = @ordnum
+    and ord.wh_id = @wh_id
+    and ord.client_id = @client_id]
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58488
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-14
+    <p>
+    This command is used to list lc ord ship act details.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

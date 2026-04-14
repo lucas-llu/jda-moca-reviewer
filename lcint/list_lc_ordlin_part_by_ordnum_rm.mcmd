@@ -1,0 +1,439 @@
+<command>
+<name>list lc ordlin part by ordnum rm</name>
+<description>list lc ordlin part by ordnum rm</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+/* No existing MOCA list command, use select statement instead. */
+[select shipment_line.ship_id,
+        shipment_line.ship_line_id,
+        shipment_line.pckqty,
+        shipment_line.shpqty,
+        shipment_line.stgqty,
+        sum(shipment_line.pckqty + shipment_line.stgqty + shipment_line.inpqty + shipment_line.oviqty +
+            case when ord_line.ordqty = shipment_line.stgqty and shipment_line.shpqty != 0 and ord_line.ordqty = shipment_line.shpqty then 0
+                 else shipment_line.shpqty
+            end) ship_line_qty,
+        ord.ordnum,
+        ord.client_id,
+        ord_line.ordlin,
+        ord_line.ordsln,
+        ord_line.wh_id,
+        ord.cponum,
+        ord.stcust,
+        ord.btcust,
+        ord.rtcust,
+        ord_line.prtnum,
+        ord_line.prt_client_id,
+        prtmst_view.stkuom,
+        ord_line.sales_ordnum,
+        ord_line.sales_ordlin,
+        ord_line.cstprt,
+        ord_line.ordlin_chg_reacod,
+        ord_line.reacod_cmnt,
+        ord_line.unt_price,
+        ord_line.crncy_code,
+        ord_line.parflg,
+        ord_line.supnum requested_supnum,
+        ord_line.invsts_prg invsts_prg,
+        ord_line.bckflg bckflg,
+        ord_line.ordqty ordqty,
+        ord_line.shpqty ord_shpqty,
+        ord_line.non_alc_flg,
+        ord_line.distro_id,
+        distro.source_distro_id,
+        ruldtl_lotnum.value lotnum,
+        ruldtl_orgcod.value orgcod,
+        ruldtl_revlvl.value revlvl,
+        ruldtl_mandte.value mandte,
+        ruldtl_expire_dte.value expire_dte,
+        ruldtl_inv_attr_str1.value inv_attr_str1,
+        ruldtl_inv_attr_str2.value inv_attr_str2,
+        ruldtl_inv_attr_str3.value inv_attr_str3,
+        ruldtl_inv_attr_str4.value inv_attr_str4,
+        ruldtl_inv_attr_str5.value inv_attr_str5,
+        ruldtl_inv_attr_str6.value inv_attr_str6,
+        ruldtl_inv_attr_str7.value inv_attr_str7,
+        ruldtl_inv_attr_str8.value inv_attr_str8,
+        ruldtl_inv_attr_str9.value inv_attr_str9,
+        ruldtl_inv_attr_str10.value inv_attr_str10,
+        ruldtl_inv_attr_str11.value inv_attr_str11,
+        ruldtl_inv_attr_str12.value inv_attr_str12,
+        ruldtl_inv_attr_str13.value inv_attr_str13,
+        ruldtl_inv_attr_str14.value inv_attr_str14,
+        ruldtl_inv_attr_str15.value inv_attr_str15,
+        ruldtl_inv_attr_str16.value inv_attr_str16,
+        ruldtl_inv_attr_str17.value inv_attr_str17,
+        ruldtl_inv_attr_str18.value inv_attr_str18,
+        ruldtl_inv_attr_int1.value inv_attr_int1,
+        ruldtl_inv_attr_int2.value inv_attr_int2,
+        ruldtl_inv_attr_int3.value inv_attr_int3,
+        ruldtl_inv_attr_int4.value inv_attr_int4,
+        ruldtl_inv_attr_int5.value inv_attr_int5,
+        ruldtl_inv_attr_flt1.value inv_attr_flt1,
+        ruldtl_inv_attr_flt2.value inv_attr_flt2,
+        ruldtl_inv_attr_flt3.value inv_attr_flt3,
+        ruldtl_inv_attr_dte1.value inv_attr_dte1,
+        ruldtl_inv_attr_dte2.value inv_attr_dte2
+   from prtmst_view
+   join ord_line
+     on prtmst_view.wh_id = ord_line.wh_id
+    and prtmst_view.prt_client_id = ord_line.prt_client_id
+    and prtmst_view.prtnum = ord_line.prtnum
+    and ord_line.cancelled_flg <> '1'
+   left outer
+   join alloc_rule_hdr rulhdr
+     on rulhdr.rule_nam = ord_line.rule_nam
+    and rulhdr.wh_id = ord_line.wh_id
+   join ord
+     on ord.wh_id = ord_line.wh_id
+    and ord.client_id = ord_line.client_id
+    and ord.ordnum = ord_line.ordnum
+   left
+   join shipment_line
+     on ord_line.wh_id = shipment_line.wh_id
+    and ord_line.client_id = shipment_line.client_id
+    and ord_line.ordnum = shipment_line.ordnum
+    and ord_line.ordlin = shipment_line.ordlin
+    and ord_line.ordsln = shipment_line.ordsln
+    and ord_line.cancelled_flg <> '1'
+    and shipment_line.linsts <> 'B'
+    and (shipment_line.inpqty + shipment_line.stgqty + shipment_line.oviqty + shipment_line.shpqty) != '0'
+   left
+   join alloc_rule_dtl ruldtl_lotnum
+     on ruldtl_lotnum.field_name = 'lotnum'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_lotnum.rule_nam = rulhdr.rule_nam
+    and ruldtl_lotnum.wh_id = ord_line.wh_id
+    and ruldtl_lotnum.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_lotnum
+     on ruldtl_lotnum.field_name = 'lotnum'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_lotnum.rule_nam = rulhdr.rule_nam
+    and ruldtl_lotnum.wh_id = ord_line.wh_id
+    and ruldtl_lotnum.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_orgcod
+     on ruldtl_orgcod.field_name = 'orgcod'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_orgcod.rule_nam = rulhdr.rule_nam
+    and ruldtl_orgcod.wh_id = ord_line.wh_id
+    and ruldtl_orgcod.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_revlvl
+     on ruldtl_revlvl.field_name = 'revlvl'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_revlvl.rule_nam = rulhdr.rule_nam
+    and ruldtl_revlvl.wh_id = ord_line.wh_id
+    and ruldtl_revlvl.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_mandte
+     on ruldtl_mandte.field_name = 'mandte'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_mandte.rule_nam = rulhdr.rule_nam
+    and ruldtl_mandte.wh_id = ord_line.wh_id
+    and ruldtl_mandte.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_expire_dte
+     on ruldtl_expire_dte.field_name = 'expire_dte'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_expire_dte.rule_nam = rulhdr.rule_nam
+    and ruldtl_expire_dte.wh_id = ord_line.wh_id
+    and ruldtl_expire_dte.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str1
+     on ruldtl_inv_attr_str1.field_name = 'inv_attr_str1'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str1.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str1.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str1.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str2
+     on ruldtl_inv_attr_str2.field_name = 'inv_attr_str2'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str2.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str2.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str2.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str3
+     on ruldtl_inv_attr_str3.field_name = 'inv_attr_str3'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str3.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str3.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str3.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str4
+     on ruldtl_inv_attr_str4.field_name = 'inv_attr_str4'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str4.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str4.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str4.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str5
+     on ruldtl_inv_attr_str5.field_name = 'inv_attr_str5'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str5.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str5.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str5.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str6
+     on ruldtl_inv_attr_str6.field_name = 'inv_attr_str6'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str6.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str6.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str6.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str7
+     on ruldtl_inv_attr_str7.field_name = 'inv_attr_str7'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str7.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str7.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str7.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str8
+     on ruldtl_inv_attr_str8.field_name = 'inv_attr_str8'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str8.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str8.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str8.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str9
+     on ruldtl_inv_attr_str9.field_name = 'inv_attr_str9'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str9.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str9.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str9.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str10
+     on ruldtl_inv_attr_str10.field_name = 'inv_attr_str10'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str10.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str10.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str10.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str11
+     on ruldtl_inv_attr_str11.field_name = 'inv_attr_str11'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str11.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str11.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str11.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str12
+     on ruldtl_inv_attr_str12.field_name = 'inv_attr_str12'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str12.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str12.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str12.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str13
+     on ruldtl_inv_attr_str13.field_name = 'inv_attr_str13'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str13.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str13.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str13.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str14
+     on ruldtl_inv_attr_str14.field_name = 'inv_attr_str14'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str14.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str14.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str14.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str15
+     on ruldtl_inv_attr_str15.field_name = 'inv_attr_str15'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str15.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str15.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str15.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str16
+     on ruldtl_inv_attr_str16.field_name = 'inv_attr_str16'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str16.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str16.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str16.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str17
+     on ruldtl_inv_attr_str17.field_name = 'inv_attr_str17'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str17.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str17.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str17.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_str18
+     on ruldtl_inv_attr_str18.field_name = 'inv_attr_str18'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_str18.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_str18.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_str18.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_int1
+     on ruldtl_inv_attr_int1.field_name = 'inv_attr_int1'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_int1.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_int1.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_int1.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_int2
+     on ruldtl_inv_attr_int2.field_name = 'inv_attr_int2'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_int2.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_int2.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_int2.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_int3
+     on ruldtl_inv_attr_int3.field_name = 'inv_attr_int3'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_int3.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_int3.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_int3.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_int4
+     on ruldtl_inv_attr_int4.field_name = 'inv_attr_int4'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_int4.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_int4.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_int4.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_int5
+     on ruldtl_inv_attr_int5.field_name = 'inv_attr_int5'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_int5.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_int5.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_int5.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_flt1
+     on ruldtl_inv_attr_flt1.field_name = 'inv_attr_flt1'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_flt1.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_flt1.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_flt1.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_flt2
+     on ruldtl_inv_attr_flt2.field_name = 'inv_attr_flt2'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_flt2.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_flt2.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_flt2.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_flt3
+     on ruldtl_inv_attr_flt3.field_name = 'inv_attr_flt3'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_flt3.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_flt3.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_flt3.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_dte1
+     on ruldtl_inv_attr_dte1.field_name = 'inv_attr_dte1'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_dte1.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_dte1.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_dte1.rule_nam = ord_line.rule_nam
+   left
+   join alloc_rule_dtl ruldtl_inv_attr_dte2
+     on ruldtl_inv_attr_dte2.field_name = 'inv_attr_dte2'
+    and rulhdr.cplx_flg = 0
+    and ruldtl_inv_attr_dte2.rule_nam = rulhdr.rule_nam
+    and ruldtl_inv_attr_dte2.wh_id = ord_line.wh_id
+    and ruldtl_inv_attr_dte2.rule_nam = ord_line.rule_nam
+   left outer
+   join distro
+     on shipment_line.wh_id = distro.wh_id
+    and shipment_line.client_id = distro.client_id
+    and ord_line.distro_id = distro.distro_id
+  where prtmst_view.prdflg = '1'
+    and @+shipment_line.ship_id
+    and @+ord.client_id
+    and @+ord.ordnum
+    and @+ord.wh_id
+    and @+prtmst_view.prtnum
+  group by shipment_line.ship_id,
+        shipment_line.ship_line_id,
+        shipment_line.pckqty,
+        shipment_line.shpqty,
+        shipment_line.stgqty,
+        ord.ordnum,
+        ord.client_id,
+        ord_line.ordlin,
+        ord_line.ordsln,
+        ord.cponum,
+        ord.stcust,
+        ord.btcust,
+        ord.rtcust,
+        ord_line.prtnum,
+        ord_line.prt_client_id,
+        prtmst_view.stkuom,
+        ord_line.sales_ordnum,
+        ord_line.sales_ordlin,
+        ord_line.cstprt,
+        ord_line.supnum,
+        ord_line.rule_nam,
+        ord_line.invsts_prg,
+        ord_line.bckflg,
+        ord_line.ordqty,
+        ord_line.shpqty,
+        ord_line.wh_id,
+        ord_line.non_alc_flg,
+        ord_line.distro_id,
+        ord_line.ordlin_chg_reacod,
+        ord_line.reacod_cmnt,
+        ord_line.unt_price,
+        ord_line.crncy_code,
+        ord_line.parflg,
+        distro.source_distro_id,
+        rulhdr.rule_nam,
+        rulhdr.cplx_flg,
+        ruldtl_lotnum.value,
+        ruldtl_orgcod.value,
+        ruldtl_revlvl.value,
+        ruldtl_mandte.value,
+        ruldtl_expire_dte.value,
+        ruldtl_inv_attr_str1.value,
+        ruldtl_inv_attr_str2.value,
+        ruldtl_inv_attr_str3.value,
+        ruldtl_inv_attr_str4.value,
+        ruldtl_inv_attr_str5.value,
+        ruldtl_inv_attr_str6.value,
+        ruldtl_inv_attr_str7.value,
+        ruldtl_inv_attr_str8.value,
+        ruldtl_inv_attr_str9.value,
+        ruldtl_inv_attr_str10.value,
+        ruldtl_inv_attr_str11.value,
+        ruldtl_inv_attr_str12.value,
+        ruldtl_inv_attr_str13.value,
+        ruldtl_inv_attr_str14.value,
+        ruldtl_inv_attr_str15.value,
+        ruldtl_inv_attr_str16.value,
+        ruldtl_inv_attr_str17.value,
+        ruldtl_inv_attr_str18.value,
+        ruldtl_inv_attr_int1.value,
+        ruldtl_inv_attr_int2.value,
+        ruldtl_inv_attr_int3.value,
+        ruldtl_inv_attr_int4.value,
+        ruldtl_inv_attr_int5.value,
+        ruldtl_inv_attr_flt1.value,
+        ruldtl_inv_attr_flt2.value,
+        ruldtl_inv_attr_flt3.value,
+        ruldtl_inv_attr_dte1.value,
+        ruldtl_inv_attr_dte2.value]
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58488
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-14
+    <p>
+<description>list lc ordlin part by ordnum rm</description>
+    This command is used to list lc  part by ordnum rm.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

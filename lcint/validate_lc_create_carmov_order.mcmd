@@ -1,0 +1,86 @@
+<command>
+<name>validate lc create carmov order</name>
+<description>validate lc create carmov order</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+/* No existing MOCA list command, use select statement instead.
+ * Retrieve data from some tables directly since there is no view for these tables.
+ */
+[select client_id
+   from shipment_line
+  where ship_id = @ship_id
+    and rownum = 1] catch(-1403)
+|
+list policies
+ where polcod = 'LC_CREATE_CARMOV'
+   and polvar = 'CHECK_ORD_FIELD'
+   and polval = 'INSTALL'
+   and rtstr1 = @client_id
+   and wh_id = nvl(@wh_id, @@wh_id)
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    list policies
+     where polcod = 'LC_CREATE_CARMOV'
+       and polvar = 'CHECK_ORD_FIELD'
+       and polval = 'FIELD'
+       and rtstr1 = @client_id
+       and wh_id = nvl(@wh_id, @@wh_id)
+       and rtnum1 = 1
+    |
+    publish data
+     where ord_field = @rtstr2
+       and field_length = @rtnum2
+    |
+    validate lc sql injection
+     where lc_input = @ord_field
+    |
+    if (@result = 1)
+    {
+        /* No existing MOCA list command, use select statement instead.
+         * Retrieve data from some tables directly since there is no view for these tables.
+         * We validate clause raw sql injection by validate lc sql injection.
+         */
+        [select @ord_field:raw res,
+                length(@ord_field:raw) len_res
+           from shipment_line sl
+           join ord
+             on sl.ordnum = ord.ordnum
+          where sl.ship_id = @ship_id
+            and @ord_field:raw is not null] catch(-1403)
+        |
+        if (@len_res <> @field_length or @? <> 0)
+        {
+            set return status
+             where status = 4100020
+        }
+    }
+    else
+    {
+        set return status
+         where status = 4100019
+    }
+}
+
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-57791
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to validate lc create carmov order.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

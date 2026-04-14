@@ -1,0 +1,61 @@
+<command>
+  <name>process lc create direct work for serial number capture</name>
+  <description>process lc create direct work for serial number capture</description>
+  <type>Local Syntax</type>
+  <local-syntax> 
+<![CDATA[
+
+list policies
+ where polcod = 'LC_SERIAL_CAPTURE'
+   and polvar = 'SKIP_SERIAL_CAPTURE'
+   and polval = 'INSTALL'
+   and rtstr1 = @client_id
+   and wh_id = @wh_id
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    process lc current serial number required prtnum
+     where subnum = @subnum catch(-1403) >> prtnum_res
+    |
+    convert column results to string
+     where res = @prtnum_res
+       and colnam = 'prtnum'
+       and separator = ''
+    |
+    if (@result_string is not null)
+    {
+        validate key exists
+         where table = 'wrkque'
+           and key = 'oprcod,lodlvl,lodnum,wh_id'
+           and oprcod = 'ASC'
+           and lodlvl = 'S'
+           and lodnum = @dstsub
+           and wh_id = @wh_id catch(@?)
+        |
+        if (@? <> 0)
+        {
+            execute server command
+             where cmd = "create work where oprcod = 'ASC' and lodlvl = 'S' and  lodnum =  '" || @dstsub || "' and wh_id = '" || @wh_id || "' and srcloc = '" || @srcloc || "' and asg_usr_id = nvl('" || @usr_id || "','" || @@usr_id || "')"
+               and inline = 0
+        }
+    }
+}
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-67708
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2026-03-31
+    <p>
+    This command is used to process lc create direct work for serial number capture.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

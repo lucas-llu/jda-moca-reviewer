@@ -1,0 +1,52 @@
+<command>
+<name>list lc packing sscc label order note fields</name>
+<description>list lc packing sscc label order note fields</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+do loop
+ where iterations = 33
+|
+if (@i < 9)
+{
+    publish data
+     where res_str = '@rpt_field_str0' || (@i + 1)
+}
+else
+{
+    publish data
+     where res_str = '@rpt_field_str' || (@i + 1)
+}
+|
+publish data
+ where cmd = "validate key exists where table = 'nottyp_hdr' and key = 'nottyp' and nottyp = " || @res_str
+|
+execute server command
+ where cmd = @cmd
+   and inline = 1 catch(@?)
+|
+if (@? = 0)
+{
+    publish data
+     where order_note_fields = @res_str
+}
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58487
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to list lc packing sscc label order note fields.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

@@ -1,0 +1,75 @@
+<command>
+<name>check ok to stage shipment</name>
+<description>check ok to stage shipment</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+list policies
+ where polcod = 'LC_OUTBOUND'
+   and polvar = 'VALIDATE_QTY_WHEN_STAGE'
+   and polval = 'INSTALL'
+   and wh_id = nvl(@wh_id, @@wh_id)
+   and rtnum1 = 1 catch(-1403) >> rs
+|
+if (@? = 0)
+{
+    /* No existing MOCA list command, use select statement instead.
+     * Retrieve data from some tables directly since there is no view for these tables.
+     */
+    [select client_id from shipment_line where ship_id = @ship_id and rownum < 2]
+    |
+    list policies
+     where polcod = 'LC_OUTBOUND'
+       and polvar = 'VALIDATE_QTY_WHEN_STAGE'
+       and polval = 'INSTALL'
+       and wh_id = nvl(@wh_id, @@wh_id)
+       and rtstr1 = @client_id
+       and rtnum1 = 1 catch(-1403)
+    |
+    if(@? = 0)
+    {
+        list lc total qty in stage by shipment
+        |
+        /* No existing MOCA list command, use select statement instead.
+         * Retrieve data from some tables directly since there is no view for these tables.
+         */
+        [select sum(inpqty) tot_inpqty
+           from shipment_line
+          where ship_id = @ship_id
+            and linsts = 'I']
+        |
+        if(@tot_inpqty != @tot_untqty)
+        {
+            /* Qty in stage not match the order qty */
+            set return status
+            where status = 4100023
+        }
+        |
+        ^check ok to stage shipment
+    }
+}
+else
+{
+    ^check ok to stage shipment
+}
+
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-63062
+    @author Reko/Steven Chen
+    @version 1.0.0
+    @since 2026-03-17
+    <p>
+    This command is used to check if the stage qty = order qty
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

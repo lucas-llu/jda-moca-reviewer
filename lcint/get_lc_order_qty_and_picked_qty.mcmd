@@ -1,0 +1,31 @@
+<command>
+  <name>get lc order qty and picked qty</name>
+  <description>get lc order qty and picked qty</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+/* no list command, use select instead */
+[select sum(appqty) total_appqty,
+        sum(pckqty) total_pckqty
+   from pckwrk_view
+  where ordnum = @ordnum
+    and wh_id = @wh_id
+    and client_id = @client_id
+    and wrktyp != 'K']
+
+]]>    
+  </local-syntax>
+  <argument name="wh_id" datatype="string">Warehouse ID</argument>
+  <argument name="ordnum" required="yes" datatype="string">Order Number</argument>
+  <argument name="client_id" required="yes" datatype="string">Client ID</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2026-04-08
+      SWIFTLEX-67708
+      The command is used to get lc order qty and picked qty.
+    </remarks>
+  </documentation>
+</command>

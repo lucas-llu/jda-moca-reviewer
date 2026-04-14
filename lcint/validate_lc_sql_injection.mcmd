@@ -1,0 +1,21 @@
+<command>
+<name>validate lc sql injection</name>
+<description>validate lc sql injection</description>
+<type>Java Method</type>
+<class>schneider.moca.lcValidateSqlInjection</class>
+<method>validate</method>
+<argument name="lc_input" datatype="string"></argument>
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58487
+    @author Lucas Lu
+    @version 1.0.0
+    @since 2025-10-27
+    <p>
+     Command will be used to validate sql injection.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

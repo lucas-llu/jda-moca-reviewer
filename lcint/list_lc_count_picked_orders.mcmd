@@ -1,0 +1,33 @@
+<command>
+<name>list lc count picked orders</name>
+<description>list lc count picked orders</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+/* No existing MOCA list command, use select statement instead. */
+[select count('x') wrkcount
+   from pckwrk_view
+  where ordnum = @ordnum
+    and ship_id = @ship_id
+    and client_id = @client_id
+    and wrktyp != 'K'
+    and appqty < pckqty]
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58488
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-14
+    <p>
+    This command is used to list lc count picked orders.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

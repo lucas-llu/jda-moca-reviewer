@@ -1,0 +1,38 @@
+<command>
+  <name>process lc case pick relabel</name>
+  <description>process lc case pick relabel</description>
+  <type>Local Syntax</type>
+  <local-syntax> 
+<![CDATA[
+
+validate key exists
+ where table = 'invsub'
+   and key = 'subnum'
+   and subnum = @srcsub catch(@?)
+|
+if (@? <> 0 and @dstsub like '%TEMP')
+{
+    change inventory identifier
+     where wh_id = @wh_id
+       and from_id = @dstsub
+       and to_id = substr(@dstsub, 1, len(@dstsub) -4)
+       and lodlvl = 'S'
+}
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-60057
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to process lc case pick relabel.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

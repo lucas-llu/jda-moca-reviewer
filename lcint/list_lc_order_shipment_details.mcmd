@@ -1,0 +1,64 @@
+<command>
+<name>list lc order shipment details</name>
+<description>list lc order shipment details</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+/* No existing MOCA list command, use select statement instead.
+ * Retrieve data from some tables directly since there is no view for these tables.
+ */
+[select distinct shp.ship_id,
+        shp.host_ext_id,
+        shp.host_client_id,
+        shp.doc_num,
+        shp.frtchg,
+        shp.frtcod,
+        shp.early_dlvdte,
+        shp.track_num,
+        shp.early_shpdte,
+        shp.late_dlvdte,
+        shp.late_shpdte,
+        shp.frtrte,
+        shp.srvlvl,
+        ord.wh_id,
+        shp.aes_typ,
+        shp.aes_acpt_dte,
+        shp.ftsrnum,
+        shp.export_typ,
+        shp.bola_num,
+        shp.stop_id,
+        shp.carcod,
+        ord.ordnum
+   from ord
+   left
+   join shipment_line shl
+     on shl.ordnum = ord.ordnum
+    and shl.wh_id = ord.wh_id
+    and shl.client_id = ord.client_id
+    and shl.linsts != 'B'
+   left
+   join shipment shp
+     on shp.ship_id = shl.ship_id
+  where ord.ordnum = @ordnum
+    and ord.wh_id = @wh_id
+    and ord.client_id = @client_id]
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58488
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-14
+    <p>
+    This command is used to list lc order shipment details.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

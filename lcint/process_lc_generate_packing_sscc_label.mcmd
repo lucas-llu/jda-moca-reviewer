@@ -1,0 +1,172 @@
+<command>
+<name>process lc generate packing sscc label</name>
+<description>process lc generate packing sscc label</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+if (@lodnum is null)
+{
+    hide stack variable
+     where name = 'lodnum'
+}
+|
+if (@subnum is null)
+{
+    hide stack variable
+     where name = 'subnum'
+}
+|
+if (@dtlnum is null)
+{
+    hide stack variable
+     where name = 'dtlnum'
+}
+|
+if (@lodnum is null and @subnum is null and @dtlnum is null)
+{
+    set return status
+     where status = 4100002
+}
+|
+/* No existing MOCA list command, use select statement instead. */
+[select distinct ordnum,
+        client_id,
+        ship_id,
+        subnum
+   from inventory_pckwrk_view
+  where @+lodnum
+    and @+subnum
+    and @+dtlnum]
+|
+list lc pack sscc ordtyp
+ where ordnum = @ordnum
+   and wh_id = @wh_id
+   and client_id = @client_id catch(-1403)
+|
+if (@? = 0)
+{
+    /* No existing MOCA list command, use select statement instead. */
+    [select distinct wrktyp,
+            lodlvl
+       from pckwrk_view
+      where ship_id = @ship_id
+        and client_id = @client_id] >> pckwrk_res
+    |
+    convert column results to string
+     where resultset = @pckwrk_res
+       and colnam = 'wrktyp'
+       and separator = ','
+    |
+    publish data
+     where wrktyp_list = @result_string
+    |
+    if (@wrktyp_list like '%K%')
+    {
+        publish data
+         where carton_flg = 1
+    }
+    |
+    if (rowcount(@pckwrk_res) = 1 and @carton_flg <> 1)
+    {
+        publish data
+         where case_flg = 1
+    }
+    |
+    if (@case_flg = 1)
+    {
+        list lc full case dim
+         where wh_id = @wh_id
+           and subnum = @subnum
+        |
+        process usr package for outbound order
+         where entity_type = 'INVSUB'
+           and entity_key = @subnum
+           and pkgtype = 'CASE'
+           and pkglen = @caslen
+           and pkgwdt = @caswid
+           and pkghgt = @cashgt
+           and grswgt = @grswgt
+           and netwgt = @netwgt >> case_detail_res
+        |
+        list policies
+         where polcod = 'LC_PCK_LBL'
+           and polvar = 'LABEL_PRINT'
+           and polval = 'CASE_PCIK'
+           and wh_id = @wh_id
+           and rtstr1 = @client_id
+           and rtnum1 = 1 catch(-1403)
+        |
+        if (@? = 0)
+        {
+            publish data
+             where print_flg = 1
+        }
+    }
+    |
+    if (@carton_flg = '1')
+    {
+        publish data
+         where print_flg = 1
+    }
+    |
+    if (@print_flg = 1)
+    {
+        update lc packing sscc label packing date
+         where ordnum = @ordnum
+           and wh_id = @wh_id
+           and client_id = @client_id
+        |
+        execute server command
+         where cmd = "list devices where devcod = nvl('" || @devcod || "', '" || @@devcod || "') and wh_id = '" || @wh_id || "'"
+           and inline = 0 catch(-1403)
+        |
+        if (@? <> 0 or @lbl_prtadr is null)
+        {
+            list lbl label formats
+             where lblfmt = 'Lc-PackingSsccLabel' catch(-1403, 510)
+            |
+            publish data
+             where lbl_prtadr = @def_printer
+        }
+        |
+        publish data
+         where lbl_prtadr = @lbl_prtadr
+        |
+        generate label
+         where locale_id = nvl(@locale_id, @@locale_id)
+           and label_name = 'Lc-PackingSsccLabel'
+           and client_id = @client_id
+           and wh_id = @wh_id
+           and ship_id = @ship_id
+           and ordnum = @ordnum
+           and subnum = @subnum catch(@?)
+        |
+        if (@? = 0)
+        {
+            print lbl label operations label
+             where filename = @outfile_name
+               and prtadr = @lbl_prtadr catch(@?)
+        }
+    }
+}
+
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58487
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to process lc generate packing sscc label.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

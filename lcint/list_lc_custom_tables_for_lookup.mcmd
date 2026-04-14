@@ -1,0 +1,17 @@
+<command>
+  <name>list lc custom tables for lookup</name>
+  <description>list lc custom tables for lookup</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+<![CDATA[
+/*Using direct SQL on table to avoid stack corruption and no views available*/
+[select lc_table_name
+   from usr_lc_orca_tables
+  where lc_table_type = 'M'
+  order by lc_table_name] catch (-1403)
+  |
+  publish data
+   where CustomTable = @lc_table_name
+]]>
+</local-syntax>
+</command>

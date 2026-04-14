@@ -1,0 +1,72 @@
+<command>
+<name>list lc sub tracked inventory subnum</name>
+<description>list lc sub tracked inventory subnum</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+list lc sub tracked inventory subnum conditions
+ where wh_id = @wh_id
+   and client_id = @client_id
+|
+/* No existing MOCA list command, use select statement instead.
+ * Retrieve data from some tables directly since there is no view for these tables. 
+ * Use raw because MOCA logic requires literal substitution. 
+ * The sub-select return very small result set */
+[select tbl.subnum,
+        tbl.untqty,
+        tbl.stoloc,
+        tbl.invsts,
+        tbl.inv_attr_str1,
+        tbl.fifdte
+   from (select iv.subnum,
+                sum(iv.untqty) untqty,
+                iv.stoloc,
+                iv.invsts,
+                iv.inv_attr_str1,
+                substr(iv.fifdte, 1, 8) fifdte,
+                min(substr(iv.fifdte, 1, 8)) over() min_fifdte
+           from pckwrk_hdr ph
+           join prtftp_dtl
+             on prtftp_dtl.prtnum = ph.prtnum
+            and prtftp_dtl.prt_client_id = ph.prt_client_id
+            and prtftp_dtl.wh_id = ph.wh_id
+            and prtftp_dtl.ftpcod = ph.ftpcod
+            and prtftp_dtl.uomcod = 'CS'
+           join inventory_view iv
+             on iv.prtnum = ph.prtnum
+            and iv.prt_client_id = ph.prt_client_id
+            and iv.wh_id = ph.wh_id
+            and @stoloc_clause:raw
+            and @invsts_clause:raw
+            and @attr1_clause:raw
+          where ph.wrkref = @wrkref
+          group by iv.subnum,
+                substr(iv.fifdte, 1, 8),
+                iv.stoloc,
+                iv.invsts,
+                iv.inv_attr_str1,
+                prtftp_dtl.untqty
+         having @having_clause:raw
+          order by substr(iv.fifdte, 1, 8)) tbl
+  where @fifdte_clause:raw]
+
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-63062
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to list lc sub tracked inventory subnum.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

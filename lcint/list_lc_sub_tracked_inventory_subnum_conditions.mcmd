@@ -1,0 +1,151 @@
+<command>
+<name>list lc sub tracked inventory subnum conditions</name>
+<description>list lc sub tracked inventory subnum conditions</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+list policies
+ where polcod = 'LC_PICK'
+   and polvar = 'PARTIAL_VALIDATION'
+   and polval = 'INSTALL'
+   and rtstr1 = @client_id
+   and wh_id = @wh_id
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    /* KIT check again if no data at 1st round. */
+	if(@recheck_flg = 1)
+	{
+	    publish data
+              where having_clause = '1=1'
+	}
+	else
+	{
+	    if(@cas_qty > 0 and (@rtnum2 = 0 or @rtnum2 = 1))
+        {
+           publish data
+             where having_clause = 'sum(iv.untqty) = prtftp_dtl.untqty'
+        }
+        /* kit pick */
+        else if(@cas_qty = 0 and (@rtnum2 = 0 or @rtnum2 = 2))
+        {
+            publish data
+             where having_clause = 'mod(sum(iv.untqty), prtftp_dtl.untqty) != 0'
+        }
+        else
+        {
+            publish data
+              where having_clause = '1=1'
+        }
+	}
+}
+else
+{
+    publish data
+     where having_clause = '1=1'
+}
+|
+list policies
+ where polcod = 'LC_PICK'
+   and polvar = 'STOLOC_VALIDATION'
+   and polval = 'INSTALL'
+   and rtstr1 = @client_id
+   and wh_id = @wh_id
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    publish data
+     where stoloc_clause = 'iv.stoloc = ph.srcloc'
+}
+else
+{
+    publish data
+     where stoloc_clause = '1=1'
+}
+|
+list policies
+ where polcod = 'LC_PICK'
+   and polvar = 'INVSTS_VALIDATION'
+   and polval = 'INSTALL'
+   and rtstr1 = @client_id
+   and wh_id = @wh_id
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    publish data
+     where invsts_clause = 'iv.invsts = ph.invsts'
+}
+else
+{
+    publish data
+     where invsts_clause = '1=1'
+}
+|
+list policies
+ where polcod = 'LC_PICK'
+   and polvar = 'ATTR1_VALIDATION'
+   and polval = 'INSTALL'
+   and rtstr1 = @client_id
+   and wh_id = @wh_id
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    publish data
+     where attr1_clause = '(iv.inv_attr_str1 = ph.inv_attr_str1 or (iv.inv_attr_str1 is null and ph.inv_attr_str1 is null))'
+}
+else
+{
+    publish data
+     where attr1_clause = '1=1'
+}
+|
+list policies
+ where polcod = 'LC_PICK'
+   and polvar = 'FIFDTE_VALIDATION'
+   and polval = 'INSTALL'
+   and rtstr1 = @client_id
+   and rtstr2 = @velzon
+   and wh_id = @wh_id
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    publish data
+     where fifdte_clause = 'fifdte = min_fifdte'
+}
+else
+{
+    publish data
+     where fifdte_clause = '1=1'
+}
+|
+publish data
+ where having_clause = @having_clause
+   and stoloc_clause = @stoloc_clause
+   and invsts_clause = @invsts_clause
+   and attr1_clause = @attr1_clause
+   and fifdte_clause = @fifdte_clause
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-63062
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to list lc sub tracked inventory subnum conditions.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

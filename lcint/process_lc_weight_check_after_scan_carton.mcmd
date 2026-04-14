@@ -1,0 +1,117 @@
+<command>
+  <name>process lc weight check after scan carton</name>
+  <description>process lc weight check after scan carton</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+get translated inventory identifier
+ where id = @subnum
+   and wh_id = @wh_id >> res
+|
+convert column results to string
+ where colnam = 'colnam'
+   and res = @res
+   and separator = ''
+|
+if (@result_string = 'subnum')
+{
+    list lc package ordnum
+     where subnum = @subnum
+    |
+    list lc package client id
+     where subnum = @subnum
+    |
+    /* validate if all picks completed for the order */
+    get lc order qty and picked qty
+      where ordnum = @ordnum
+        and wh_id = nvl(@wh_id, @@wh_id)
+        and client_id = @client_id
+    |
+    if (@total_appqty != @total_pckqty)
+    {
+        set return status
+         where code = 4100024
+    };
+    /* validate if all serial number captured */
+    process lc current serial number required prtnum
+     where subnum = @subnum
+    |
+    if (@prtnum)
+    {
+        set return status
+         where code = 4100025
+    };
+    /* validate sscc number */
+    list lc carton ready to complete for pick enhancement
+     where subnum = @subnum
+       and new_carton_start_position = 3 catch(@?) >>carton_complete_res
+    |
+    if (rowcount(@carton_complete_res) > 0)
+    {
+        set return status
+         where status = 4100013
+           and ctnnum = @subnum
+    };
+    validate key exists
+     where table = 'inventory_view'
+       and key = 'subnum,stoloc,wh_id'
+       and subnum = @subnum
+       and stoloc = @devcod
+       and wh_id = @wh_id catch(@?)
+    |
+    if (@? = 0)
+    {
+        process lc inventory details for weight check
+         where subnum = @subnum
+           and wh_id = @wh_id
+    }
+    else
+    {
+        get lc weight check whether carton in policy move zone
+         where subnum = @subnum
+           and wh_id = @wh_id catch(@?)
+        |
+        if (@? = 0)
+        {
+            hide stack variable
+             where name = 'stoloc'
+            |
+            generate next lpn
+            |
+            execute server command
+             where command = "move inventory where subnum = '" || @subnum || "' and dstloc = '" || @devcod || "' and wh_id= '" || @wh_id || "' and dstlod = '" || @nxtnum || "' and newdst=1"
+               and inline = 0
+            |
+            process lc inventory details for weight check
+             where subnum = @subnum
+               and wh_id = @wh_id
+        }
+        else
+        {
+            set return status
+             where code = 4100004
+        }
+    }
+}
+else
+{
+    set return status
+     where code = 10667
+}
+
+]]>    
+  </local-syntax>
+  <argument name="wh_id" required="yes" datatype="string">Warehouse ID</argument>
+  <argument name="subnum" required="yes" datatype="string">Sub-LPN</argument>
+  <argument name="devcod" required="yes" datatype="string">Device Code</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2025-10-17
+      SWIFTLEX-57791
+      process lc weight check after scan carton
+    </remarks>
+  </documentation>
+</command>

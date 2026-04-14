@@ -1,0 +1,54 @@
+<command>
+  <name>create lc weight check history</name>
+  <description>create lc weight check history</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+create record
+ where table = 'usr_lc_weight_check_hist'
+   and history_id = @history_id
+   and subnum = @subnum
+   and ordnum = @ordnum
+   and ship_id = @ship_id
+   and pick_usr_id = @pick_usr_id
+   and policy_condition = @policy_condition
+   and @+reason_code
+   and @+wh_id
+   and @+client_id
+   and @+carton_code
+   and @+system_mat_wgt
+   and @+system_carton_wgt
+   and @+total_system_wgt
+   and @+weighting_scale_wgt
+   and @+item_count
+   and @+station_pack_no
+
+]]>    
+  </local-syntax>
+  <argument name="history_id" required="yes" datatype="string">Weight Check History Id</argument>
+  <argument name="subnum" required="yes" datatype="string">Sub-LPN</argument>
+  <argument name="ordnum" required="yes" datatype="string">Order Number</argument>
+  <argument name="ship_id" datatype="string">Shipment Id</argument>
+  <argument name="pick_usr_id" required="yes" datatype="string">Picking User Id</argument>
+  <argument name="policy_condition" required="yes" datatype="string">Policy Condition</argument>
+  <argument name="reason_code" datatype="string">Reason Code</argument>
+  <argument name="wh_id" datatype="string">Warehouse Id</argument>
+  <argument name="client_id" datatype="string">Client Id</argument>
+  <argument name="carton_code" datatype="string">Carton Code</argument>
+  <argument name="system_mat_wgt" datatype="float">Total Weight as per Item Master</argument>
+  <argument name="system_carton_wgt" datatype="float">Carton Weight</argument>
+  <argument name="total_system_wgt" datatype="float">Total System Weight</argument>
+  <argument name="weighting_scale_wgt" datatype="float">Weight from Weighting Machine</argument>
+  <argument name="item_count" datatype="integer">Item Count</argument>
+  <argument name="station_pack_no" datatype="string">Pack Station No</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2025-10-21
+      SWIFTLEX-57791
+      create lc weight check history
+    </remarks>
+  </documentation>
+</command>

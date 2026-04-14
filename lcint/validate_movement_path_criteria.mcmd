@@ -1,0 +1,170 @@
+<command>
+  <name>validate movement path criteria</name>
+  <description>validate movement path criteria</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+<![CDATA[
+
+list policies
+ where polcod = 'LC_WEIGHT_CHECK'
+   and polvar = 'MOVE_PATH'
+   and polval = 'INSTALL'
+   and wh_id = @wh_id
+   and rownum = 1
+   and rtnum1 = 1 catch(-1403) >> res_small
+|
+if (@? = 0)
+{
+    /*No existing MOCA list command, use select statement instead.
+     *Retrieve data from some tables directly since there is no view for these tables.*/
+    [select client_id,
+            ordnum
+       from shipment_line
+      where ship_line_id = @ship_line_id
+        and rownum = 1]
+    |
+    list policies
+     where polcod = 'LC_WEIGHT_CHECK'
+       and polvar = 'MOVE_PATH'
+       and polval = 'INSTALL'
+       and rtstr1 = @client_id
+       and wh_id = @wh_id
+       and rownum = 1
+       and rtnum1 = 1 catch(-1403) >> res_small
+    |
+    if (@? = 0)
+    {
+        {
+            get lc order full case percent
+             where ordnum = @ordnum
+               and client_id = @client_id
+               and wh_id = @wh_id
+            |
+            publish data
+             where where_decimal_point = instr(@column1, '.')
+            |
+            if (@where_decimal_point > 0)
+            {
+                publish data
+                 where carton_pick_flag = 1
+            }
+        } >> res
+        |
+        publish data
+         where carton_pick_count = rowcount(@res)
+        |
+        if (@carton_pick_count = 0)
+        {
+            publish data
+             where order_full_case_flg = 1
+        }
+        else
+        {
+            publish data
+             where order_with_carton_flg = 1
+        }
+        |
+        {
+            /*No existing MOCA list command, use select statement instead.
+             *Retrieve data from some tables directly since there is no view for these tables.*/
+            [select prtnum,
+                    prt_client_id
+               from ord_line
+              where ordnum = @ordnum
+              group by prtnum,
+                    prt_client_id]
+            |
+            check serial number capture required
+             where cur_frm_typ = 'OUTBOUND'
+               and check_sernum = '1'
+               and wh_id = @wh_id
+               and prtnum = @prtnum
+               and prt_client_id = @prt_client_id catch(@?)
+        } >> serial_required_res
+        |
+        if (rowcount(@serial_required_res) > 0)
+        {
+            list policies
+             where polcod = 'LC_WEIGHT_CHECK'
+               and polvar = 'MOVE_PATH'
+               and polval = 'SERIAL_INSPECT'
+               and rtstr1 = @client_id
+               and wh_id = @wh_id
+               and rownum = 1 catch(@?)
+            |
+            publish data
+             where serial_required_flg = @rtnum1
+               and serial_inspect_cri = @rtstr2
+        }
+        |
+        {
+            list policies
+             where polcod = 'LC_WEIGHT_CHECK'
+               and polvar = 'MOVE_PATH'
+               and polval = 'WEIGHT_INSPECT'
+               and rtstr1 = @client_id
+               and wh_id = @wh_id
+               and rownum = 1 catch(@?)
+            |
+            publish data
+             where weight_inspect_cri = @rtstr2
+        }
+        |
+        {
+            list policies
+             where polcod = 'LC_WEIGHT_CHECK'
+               and polvar = 'MOVE_PATH'
+               and polval = 'CASE_INSPECT'
+               and rtstr1 = @client_id
+               and wh_id = @wh_id
+               and rownum = 1 catch(@?)
+            |
+            publish data
+             where case_inspect_cri = @rtstr2
+        }
+        |
+        if (@order_with_carton_flg = 1 and @cri_id = @case_inspect_cri)
+        {
+            set return status
+             where status = -1403
+        }
+        else if (@order_full_case_flg = 1 and @cri_id = @weight_inspect_cri)
+        {
+            set return status
+             where status = -1403
+        }
+        else if (@serial_required_flg != 1 and @cri_id = @serial_inspect_cri)
+        {
+            set return status
+             where status = -1403
+        }
+    }
+    |
+    ^validate movement path criteria
+     where wh_id = @wh_id
+       and ship_line_id = @ship_line_id
+       and cri_id = @cri_id
+}
+else
+{
+    ^validate movement path criteria
+}
+
+]]>
+</local-syntax>
+<documentation>
+<remarks>
+<![CDATA[
+    @author Reko/Kevin
+    @version 1.0.1
+    @since 2025-11-5
+    <p>
+        the command choose the weight inspect or case inspect move path for the order
+    </p>
+]]>
+</remarks> 
+</documentation>
+</command>
+
+
+

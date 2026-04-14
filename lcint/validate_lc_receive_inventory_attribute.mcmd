@@ -1,0 +1,72 @@
+<command>
+<name>validate lc receive inventory attribute</name>
+<description>validate lc receive inventory attribute</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+publish data
+ where trknum = @trknum
+   and wh_id = nvl(@wh_id, @@wh_id)
+   and client_id = @client_id
+   and rcvqty = @rcvqty
+   and prtnum = @prtnum
+|
+list policies
+ where polcod = 'LC_RECEIVE'
+   and polvar = 'INVENTORY_ATTRIBUTE'
+   and polval = 'ATTRIBUTE_CHECK'
+   and rtstr1 = @client_id
+   and wh_id = nvl(@wh_id, @@wh_id)
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    publish data
+     where trknum = @trknum
+       and wh_id = nvl(@wh_id, @@wh_id)
+       and client_id = @client_id
+       and rcvqty = @rcvqty
+       and prtnum = @prtnum
+    |
+    /* No existing MOCA list command, use select statement instead.
+     * Retrieve data from some tables directly since there is no view for these tables.
+     */
+    [select distinct inv_attr_str1
+       from rcvlin
+      where trknum = @trknum
+        and client_id = @client_id
+        and wh_id = @wh_id
+        and prtnum = @prtnum
+        and idnqty < expqty
+      order by inv_attr_str1] catch(-1403) >> res_rcv
+    |
+    publish top rows
+     where res = @res_rcv
+       and rows = 1
+    |
+    publish data
+     where dvc_var_nam = 'inv_attr_str1'
+       and dvc_ena_flg = '0'
+       and dvc_vis_flg = decode(@inv_attr_str1, null, 0, 1)
+       and inv_attr_str1 = @inv_attr_str1
+}
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-61837
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2026-01-05
+    <p>
+    This command is used to validate lc receive inventory attribute.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

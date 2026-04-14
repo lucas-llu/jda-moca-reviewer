@@ -1,0 +1,56 @@
+<command>
+<name>validate lc sub tracked inventory subnum</name>
+<description>validate lc sub tracked inventory subnum</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+publish data
+ where wh_id = @wh_id
+   and wrkref = @wrkref
+   and lodnum = @lodnum
+|
+list lc wrkref client id
+ where wrkref = @wrkref catch(-1403)
+|
+list lc sub tracked inventory case pick qty
+ where wrkref = @wrkref
+|
+list lc sub tracked inventory subnum
+ where wrkref = @wrkref catch(-1403) >> sub_res
+|
+if(@cas_qty = 0 and @? = -1403)
+{
+    list lc sub tracked inventory subnum
+   where wrkref = @wrkref and recheck_flg = 1 catch(-1403) >> sub_res
+}
+|
+convert column results to string
+ where colnam = 'subnum'
+   and res = @sub_res
+   and separator = ','
+|
+if (instr(@result_string, @lodnum) = 0)
+{
+    set return status
+     where status = 4100022
+}
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-63062
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to validate lc sub tracked inventory subnum.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

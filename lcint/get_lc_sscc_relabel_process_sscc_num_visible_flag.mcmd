@@ -1,0 +1,41 @@
+<command>
+  <name>get lc sscc relabel process sscc num visible flag</name>
+  <description>get lc sscc relabel process sscc num visible flag</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+get translated inventory identifier
+ where id = @invtid
+   and wh_id = nvl(@wh_id, @@wh_id) catch(@?)
+|
+if (@? = 0)
+{
+    list lc package client id
+     where subnum = @invtid
+    |
+    /* not use list policies or validate key exists here as we need to validate by @invtid like (rtstr2 || '%') */
+    [select 'N' visible_flag
+       from poldat
+      where polcod = 'LC_RELABEL'
+        and polvar = 'SKIP_SCAN_SSCC_NUM'
+        and polval = 'PREFIX'
+        and rtstr1 = @client_id /*#nobind*/
+        and @invtid like (rtstr2 || '%') /*#bind*/
+        and wh_id_tmpl = nvl(@wh_id, @@wh_id)
+        and rownum = 1] catch(@?)
+}
+
+]]>    
+  </local-syntax>
+  <argument name="wh_id" required="yes" datatype="string">Warehouse ID</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2026-04-02
+      SWIFTLEX-67708
+      The command is used to get lc sscc relabel process sscc num visible flag.
+    </remarks>
+  </documentation>
+</command>
