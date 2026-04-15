@@ -144,6 +144,18 @@ function checkNameNoUpperCase(nameContent: string, file: string): McmdIssue[] {
         });
     }
 
+    if (/[^a-z\s]/.test(nameContent)) {
+        const invalidChars = nameContent.match(/[^a-z\s]/g) || [];
+        issues.push({
+            file,
+            line: 1,
+            column: 1,
+            severity: vscode.DiagnosticSeverity.Error,
+            message: `<name> tag can only contain lowercase letters and spaces. Found: ${[...new Set(invalidChars)].join(', ')}`,
+            rule: 'name-invalid-characters'
+        });
+    }
+
     if (nameContent.includes('  ')) {
         issues.push({
             file,
