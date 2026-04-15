@@ -310,66 +310,95 @@ function checkComplexSql(sqlCode: string, commandName: string, file: string, lin
     const lowerName = commandName;
     const isListOrGet = lowerName.startsWith('list ') || lowerName.startsWith('get ');
 
-    const selectCount = (sqlCode.match(/\bselect\b/gi) || []).length;
-    if (selectCount > 2) {
+    const blocks: string[] = [];
+    let currentBlock = '';
+    let inBracket = false;
+    let bracketDepth = 0;
+    
+    for (let i = 0; i < sqlCode.length; i++) {
+        const char = sqlCode[i];
+        
+        if (!inBracket && char === '[') {
+            inBracket = true;
+            bracketDepth = 1;
+            currentBlock = char;
+        } else if (inBracket) {
+            currentBlock += char;
+            if (char === '[') {
+                bracketDepth++;
+            } else if (char === ']') {
+                bracketDepth--;
+                if (bracketDepth === 0) {
+                    inBracket = false;
+                    blocks.push(currentBlock);
+                    currentBlock = '';
+                }
+            }
+        }
+    }
+
+    let maxSelectInBlock = 0;
+    let totalSelectBlocks = 0;
+
+    for (const block of blocks) {
+        if (/\bselect\b/i.test(block)) {
+            totalSelectBlocks++;
+            const selectMatches = block.match(/\bselect\b/gi) || [];
+            const selectCount = selectMatches.length;
+            if (selectCount > maxSelectInBlock) {
+                maxSelectInBlock = selectCount;
+            }
+        }
+    }
+
+    if (totalSelectBlocks > 2) {
         if (!isListOrGet) {
             issues.push({
                 file,
                 line: 1,
                 column: 1,
                 severity: vscode.DiagnosticSeverity.Error,
-                message: `Complex SQL (${selectCount} SELECT statements) can only appear in list/get commands`,
+                message: `Complex SQL (${totalSelectBlocks} SELECT blocks) can only appear in list/get commands`,
                 rule: 'complex-sql-select'
             });
         }
     }
 
-    const joinCount = (sqlCode.match(/\bjoin\b/gi) || []).length;
-    const unionCount = (sqlCode.match(/\bunion\s+all\b|\bunion\b/gi) || []).length;
-    if (joinCount > 2 || unionCount > 2) {
+    if (maxSelectInBlock > 2) {
         if (!isListOrGet) {
             issues.push({
                 file,
                 line: 1,
                 column: 1,
                 severity: vscode.DiagnosticSeverity.Error,
-                message: `Complex SQL (${joinCount} JOINs, ${unionCount} UNIONs) can only appear in list/get commands`,
-                rule: 'complex-sql-join-union'
-            });
-        }
-    }
-
-    const subqueryCount = (sqlCode.match(/\(select\s+/gi) || []).length;
-    if (subqueryCount > 2) {
-        if (!isListOrGet) {
-            issues.push({
-                file,
-                line: 1,
-                column: 1,
-                severity: vscode.DiagnosticSeverity.Error,
-                message: `Complex SQL (${subqueryCount} subqueries) can only appear in list/get commands`,
+                message: `Complex SQL (${maxSelectInBlock} SELECT statements in one block) can only appear in list/get commands`,
                 rule: 'complex-sql-subquery'
             });
         }
     }
 
-    const tablePattern = /\bfrom\s+(\w+)/gi;
-    const tables: string[] = [];
-    let match;
-    while ((match = tablePattern.exec(sqlCode)) !== null) {
-        tables.push(match[1]);
-    }
-    const uniqueTables = new Set(tables);
-    if (uniqueTables.size > 2) {
-        if (!isListOrGet) {
-            issues.push({
-                file,
-                line: 1,
-                column: 1,
-                severity: vscode.DiagnosticSeverity.Error,
-                message: `Complex SQL (${uniqueTables.size} tables: ${[...uniqueTables].join(', ')}) can only appear in list/get commands`,
-                rule: 'complex-sql-tables'
-            });
+    for (const block of blocks) {
+        if (/\bselect\b/i.test(block)) {
+            const tablePattern = /\bfrom\s+(\w+)/gi;
+            const tablesInBlock: string[] = [];
+            let match;
+            while ((match = tablePattern.exec(block)) !== null) {
+                tablesInBlock.push(match[1]);
+            }
+            const uniqueTablesInBlock = new Set(tablesInBlock);
+            
+            if (uniqueTablesInBlock.size > 2) {
+                if (!isListOrGet) {
+                    issues.push({
+                        file,
+                        line: 1,
+                        column: 1,
+                        severity: vscode.DiagnosticSeverity.Error,
+                        message: `Complex SQL (${uniqueTablesInBlock.size} tables in one block: ${[...uniqueTablesInBlock].join(', ')}) can only appear in list/get commands`,
+                        rule: 'complex-sql-tables'
+                    });
+                }
+            }
         }
     }
 
