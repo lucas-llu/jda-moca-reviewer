@@ -93,16 +93,20 @@ async function performMcmdReview(document: vscode.TextDocument): Promise<McmdIss
 
     issues.push(...checkFileStructure(text, fileName));
 
+    const localSyntaxMatch = text.match(/<local-syntax>[\s\S]*?<!\[CDATA\[([\s\S]*?)\]\]>/i);
+    let sqlCode = '';
+    if (localSyntaxMatch) {
+        sqlCode = localSyntaxMatch[1];
+    }
+
     const nameMatch = text.match(/<name>([\s\S]*?)<\/name>/i);
     if (nameMatch) {
         const nameContent = nameMatch[1].trim();
         issues.push(...checkNameMatchesFile(nameContent, fileNameNoExt, fileName));
-        issues.push(...checkNameContainsLc(nameContent, fileName));
+        issues.push(...checkNameContainsLc(nameContent, fileName, sqlCode));
     }
 
-    const localSyntaxMatch = text.match(/<local-syntax>[\s\S]*?<!\[CDATA\[([\s\S]*?)\]\]>/i);
     if (localSyntaxMatch) {
-        let sqlCode = localSyntaxMatch[1];
         const cdataStart = text.indexOf('<![CDATA[');
         const linesBeforeSql = text.substring(0, cdataStart).split('\n').length;
         sqlCode = removeComments(sqlCode);
@@ -144,14 +148,14 @@ function checkNameNoUpperCase(nameContent: string, file: string): McmdIssue[] {
         });
     }
 
-    if (/[^a-z\s]/.test(nameContent)) {
-        const invalidChars = nameContent.match(/[^a-z\s]/g) || [];
+    if (/[^a-z0-9\s]/.test(nameContent)) {
+        const invalidChars = nameContent.match(/[^a-z0-9\s]/g) || [];
         issues.push({
             file,
             line: 1,
             column: 1,
             severity: vscode.DiagnosticSeverity.Error,
-            message: `<name> tag can only contain lowercase letters and spaces. Found: ${[...new Set(invalidChars)].join(', ')}`,
+            message: `<name> tag can only contain lowercase letters, numbers and spaces. Found: ${[...new Set(invalidChars)].join(', ')}`,
             rule: 'name-invalid-characters'
         });
     }
@@ -295,22 +299,40 @@ function checkNameMatchesFile(nameContent: string, fileNameNoExt: string, file: 
     return issues;
 }
 
-function checkNameContainsLc(nameContent: string, file: string): McmdIssue[] {
+function checkNameContainsLc(nameContent: string, file: string, sqlCode: string = ''): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const lowerName = nameContent;
+    const lowerName = nameContent.toLowerCase();
+    const hasLc = lowerName.includes('lc');
 
-    const firstSpaceIndex = lowerName.indexOf(' ');
-    if (firstSpaceIndex > 0 && firstSpaceIndex < nameContent.length - 1) {
-        const afterFirstSpace = nameContent.substring(firstSpaceIndex + 1);
-        if (!afterFirstSpace.includes('lc ')) {
+    if (!hasLc && sqlCode) {
+        const trimmedCode = sqlCode.trim();
+        const startsWithListPolicies = /^list\s+policies/i.test(trimmedCode);
+        const hasIfElse = /\bif\s*\([^)]*\)\s*\{[\s\S]*?\}\s*\belse\s*\{[\s\S]*?\}/i.test(trimmedCode);
+        
+        if (!startsWithListPolicies || !hasIfElse) {
             issues.push({
                 file,
                 line: 1,
                 column: 1,
                 severity: vscode.DiagnosticSeverity.Warning,
-                message: `Name '${nameContent}' may be missing 'lc' prefix after first word. Please verify.`,
+                message: `Name '${nameContent}' does not contain 'lc' and does not start with 'list policies' and 'if(...){...}else{...}' structure. This may be an invalid command.`,
                 rule: 'missing-lc'
             });
+        }
+    } else if (!hasLc) {
+        const firstSpaceIndex = nameContent.indexOf(' ');
+        if (firstSpaceIndex > 0 && firstSpaceIndex < nameContent.length - 1) {
+            const afterFirstSpace = nameContent.substring(firstSpaceIndex + 1);
+            if (!afterFirstSpace.includes('lc ')) {
+                issues.push({
+                    file,
+                    line: 1,
+                    column: 1,
+                    severity: vscode.DiagnosticSeverity.Warning,
+                    message: `Name '${nameContent}' may be missing 'lc' prefix after first word. Please verify.`,
+                    rule: 'missing-lc'
+                });
+            }
         }
     }
 
@@ -419,45 +441,53 @@ function checkComplexSql(sqlCode: string, commandName: string, file: string, lin
 
 function checkInsertUpdateDelete(sqlCode: string, commandName: string, file: string, lineOffset: number = 0): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const lines = sqlCode.split('\n');
+    const lowerName = commandName.toLowerCase();
+    const isListOrGet = lowerName.startsWith('list ') || lowerName.startsWith('get ');
 
-    const insertPattern = /\binsert\s+into\b/i;
-    const updatePattern = /\bupdate\s+\w+\s+set\b/i;
-    const deletePattern = /\bdelete\s+from\b/i;
+    if (isListOrGet) {
+        return issues;
+    }
+
+    const lines = sqlCode.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lineNumber = i + 1;
 
-        if (insertPattern.test(line)) {
+        const lineWithoutStrings = removeStringLiterals(line);
+
+        const insertMatch = /\binsert\s+into\b/i.exec(lineWithoutStrings);
+        if (insertMatch) {
             issues.push({
                 file,
                 line: lineNumber + lineOffset,
                 column: line.indexOf('insert') + 1,
                 severity: vscode.DiagnosticSeverity.Warning,
-                message: `Avoid using INSERT in command '${commandName}'`,
+                message: `INSERT is used in this command, please note`,
                 rule: 'avoid-insert'
             });
         }
 
-        if (updatePattern.test(line)) {
+        const updateMatch = /\bupdate\b/i.exec(lineWithoutStrings);
+        if (updateMatch) {
             issues.push({
                 file,
                 line: lineNumber + lineOffset,
                 column: line.indexOf('update') + 1,
                 severity: vscode.DiagnosticSeverity.Warning,
-                message: `Avoid using UPDATE in command '${commandName}'`,
+                message: `UPDATE is used in this command, please note`,
                 rule: 'avoid-update'
             });
         }
 
-        if (deletePattern.test(line)) {
+        const deleteMatch = /\bdelete\b/i.exec(lineWithoutStrings);
+        if (deleteMatch) {
             issues.push({
                 file,
                 line: lineNumber + lineOffset,
                 column: line.indexOf('delete') + 1,
                 severity: vscode.DiagnosticSeverity.Warning,
-                message: `Avoid using DELETE in command '${commandName}'`,
+                message: `DELETE is used in this command, please note`,
                 rule: 'avoid-delete'
             });
         }
@@ -466,26 +496,64 @@ function checkInsertUpdateDelete(sqlCode: string, commandName: string, file: str
     return issues;
 }
 
+function removeStringLiterals(line: string): string {
+    let result = '';
+    let i = 0;
+    while (i < line.length) {
+        const char = line[i];
+        if (char === "'" || char === '"') {
+            const quote = char;
+            i++;
+            while (i < line.length && line[i] !== quote) {
+                if (line[i] === '\\' && i + 1 < line.length) {
+                    i += 2;
+                } else {
+                    i++;
+                }
+            }
+            i++;
+        } else {
+            result += char;
+            i++;
+        }
+    }
+    return result;
+}
+
 function checkInClause(sqlCode: string, file: string, lineOffset: number = 0): McmdIssue[] {
     const issues: McmdIssue[] = [];
     const lines = sqlCode.split('\n');
-
-    const inWithSelectPattern = /\bin\s*\(\s*select\b/gi;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lineNumber = i + 1;
 
+        const inPattern = /\bin\s*\(/gi;
         let match;
-        while ((match = inWithSelectPattern.exec(line)) !== null) {
-            issues.push({
-                file,
-                line: lineNumber + lineOffset,
-                column: match.index + 1,
-                severity: vscode.DiagnosticSeverity.Error,
-                message: 'Use EXISTS instead of IN (subquery) clause',
-                rule: 'no-in-subquery'
-            });
+        while ((match = inPattern.exec(line)) !== null) {
+            const inIndex = match.index;
+            const inColumn = inIndex + 1;
+
+            const afterParen = line.substring(inIndex + match[0].length).trim();
+
+            const isValueList = /^["']/.test(afterParen);
+            const isVariable = /^@/.test(afterParen);
+
+            if (!isValueList && !isVariable) {
+                const nextLines = lines.slice(i + 1).join(' ');
+                const combinedContent = afterParen + ' ' + nextLines;
+
+                if (/^\s*select\b/i.test(combinedContent)) {
+                    issues.push({
+                        file,
+                        line: lineNumber + lineOffset,
+                        column: inColumn,
+                        severity: vscode.DiagnosticSeverity.Error,
+                        message: 'Use EXISTS instead of IN (subquery) clause',
+                        rule: 'no-in-subquery'
+                    });
+                }
+            }
         }
     }
 
@@ -525,12 +593,11 @@ function checkDivisionWithDecode(sqlCode: string, file: string, lineOffset: numb
     const issues: McmdIssue[] = [];
     const lines = sqlCode.split('\n');
 
-    const divisionPattern = /\s\/\s*@?(\w+\.\w+|\w+)/g;
-
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lineNumber = i + 1;
 
+        const divisionPattern = /\s\/\s*@?(\w+\.\w+|\w+)/g;
         let match;
         while ((match = divisionPattern.exec(line)) !== null) {
             const divisionText = match[0].trim();
@@ -626,11 +693,14 @@ function showIssuesInProblemsPanel(issues: McmdIssue[]): void {
             issuesByFile.set(issue.file, []);
         }
 
+        const line = Math.max(1, issue.line);
+        const column = Math.max(1, issue.column);
+
         const range = new vscode.Range(
-            issue.line - 1,
-            issue.column - 1,
-            issue.line - 1,
-            issue.column
+            line - 1,
+            column - 1,
+            line - 1,
+            column
         );
 
         const diagnostic = new vscode.Diagnostic(range, issue.message, issue.severity);
