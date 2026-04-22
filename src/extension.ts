@@ -109,10 +109,11 @@ async function performMcmdReview(document: vscode.TextDocument): Promise<McmdIss
     if (localSyntaxMatch) {
         const cdataStart = text.indexOf('<![CDATA[');
         const linesBeforeSql = text.substring(0, cdataStart).split('\n').length;
-        sqlCode = removeComments(sqlCode);
-
         const nameMatch = text.match(/<name>([\s\S]*?)<\/name>/i);
         const nameContent = nameMatch ? nameMatch[1].trim() : '';
+
+        issues.push(...checkSelectFromNonView(sqlCode, fileName, linesBeforeSql));
+        sqlCode = removeComments(sqlCode);
 
         issues.push(...checkComplexSql(sqlCode, nameContent, fileName, linesBeforeSql));
         issues.push(...checkInsertUpdateDelete(sqlCode, nameContent, fileName, linesBeforeSql));
@@ -681,6 +682,52 @@ function checkListGetNoDml(sqlCode: string, commandName: string, file: string): 
     }
 
     return issues;
+}
+
+function checkSelectFromNonView(sqlCode: string, file: string, lineOffset: number = 0): McmdIssue[] {
+    const issues: McmdIssue[] = [];
+    const lines = sqlCode.split('\n');
+
+    const fromPattern = /\bfrom\s+(\w+)/gi;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineNumber = i + 1;
+
+        const fromPatternLocal = /\bfrom\s+(\w+)/gi;
+        let match;
+        while ((match = fromPatternLocal.exec(line)) !== null) {
+            const tableName = match[1];
+            if (!tableName.toLowerCase().endsWith('_view')) {
+                const codeBeforeFrom = lines.slice(0, i + 1).join('\n');
+                if (hasViewCommentInCode(codeBeforeFrom)) {
+                    continue;
+                }
+                issues.push({
+                    file,
+                    line: lineNumber + lineOffset,
+                    column: match.index + 1,
+                    severity: vscode.DiagnosticSeverity.Warning,
+                    message: `SELECT FROM table '${tableName}' that does not end with '_view'. Please add a comment to explain why you are selecting from a non-view table.`,
+                    rule: 'select-from-non-view'
+                });
+            }
+        }
+    }
+
+    return issues;
+}
+
+function hasViewCommentInCode(code: string): boolean {
+    const commentPattern = /\/\*([\s\S]*?)\*\//g;
+    let match;
+    while ((match = commentPattern.exec(code)) !== null) {
+        const commentContent = match[1];
+        if (commentContent.toLowerCase().includes('view')) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function showIssuesInProblemsPanel(issues: McmdIssue[]): void {
