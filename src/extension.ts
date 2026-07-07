@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { exec } from 'child_process';
 
 // Global diagnostic collection for storing and displaying code issues
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -72,7 +73,87 @@ export function activate(context: vscode.ExtensionContext) {
         }
     );
 
-    context.subscriptions.push(reviewFileCommand, reviewProjectCommand);
+    const reviewByJiraCommand = vscode.commands.registerCommand(
+        'code-reviewer.reviewByJiraTicket',
+        async () => {
+            const ticket = await vscode.window.showInputBox({
+                prompt: 'Enter Jira ticket number (e.g. SWIFTLEX-51198)',
+                placeHolder: 'SWIFTLEX-12345',
+                validateInput: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return 'Jira ticket number cannot be empty';
+                    }
+                    return null;
+                }
+            });
+
+            if (!ticket) {
+                return;
+            }
+
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders) {
+                vscode.window.showErrorMessage('No workspace folder found');
+                return;
+            }
+            const workspaceRoot = workspaceFolders[0].uri.fsPath;
+
+            let changedFiles: string[];
+            try {
+                changedFiles = await getGitChangedFiles(ticket.trim(), workspaceRoot);
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to search git history: ${err.message}`);
+                return;
+            }
+
+            if (changedFiles.length === 0) {
+                vscode.window.showInformationMessage(
+                    `No files found in commits for ticket "${ticket.trim()}"`
+                );
+                return;
+            }
+
+            // Separate .mcmd files (full review) from other files (basic review)
+            const mcmdFiles = changedFiles.filter(f => f.endsWith('.mcmd'));
+            const otherFiles = changedFiles.filter(f => !f.endsWith('.mcmd'));
+
+            diagnosticCollection.clear();
+            const allIssues: McmdIssue[] = [];
+
+            for (const relativePath of mcmdFiles) {
+                const absolutePath = path.join(workspaceRoot, relativePath);
+                try {
+                    const document = await vscode.workspace.openTextDocument(absolutePath);
+                    const issues = await performMcmdReview(document);
+                    allIssues.push(...issues);
+                } catch {
+                    console.log(`Skipping file (may be deleted): ${absolutePath}`);
+                }
+            }
+
+            for (const relativePath of otherFiles) {
+                const absolutePath = path.join(workspaceRoot, relativePath);
+                try {
+                    const document = await vscode.workspace.openTextDocument(absolutePath);
+                    const issues = await performFileReview(document);
+                    allIssues.push(...issues);
+                } catch {
+                    console.log(`Skipping file (may be deleted): ${absolutePath}`);
+                }
+            }
+
+            const totalCount = mcmdFiles.length + otherFiles.length;
+            if (allIssues.length === 0) {
+                vscode.window.showInformationMessage(
+                    `No issues found in ${totalCount} file(s) from ticket "${ticket.trim()}".`
+                );
+            } else {
+                showIssuesInProblemsPanel(allIssues);
+            }
+        }
+    );
+
+    context.subscriptions.push(reviewFileCommand, reviewProjectCommand, reviewByJiraCommand);
 }
 
 interface McmdIssue {
@@ -82,6 +163,73 @@ interface McmdIssue {
     severity: vscode.DiagnosticSeverity;
     message: string;
     rule: string;
+}
+
+/**
+ * Basic file review for non-.mcmd files. Checks line length, console.log usage,
+ * TODO/FIXME hints, and trailing backslashes — applicable to any source file type.
+ */
+async function performFileReview(document: vscode.TextDocument): Promise<McmdIssue[]> {
+    const issues: McmdIssue[] = [];
+    const fileName = document.fileName;
+    const lines = document.getText().split('\n');
+    const maxLineLength = 120;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineNumber = i + 1;
+
+        // Line length check
+        if (line.length > maxLineLength) {
+            issues.push({
+                file: fileName,
+                line: lineNumber,
+                column: maxLineLength + 1,
+                severity: vscode.DiagnosticSeverity.Warning,
+                message: `Line exceeds ${maxLineLength} characters (${line.length})`,
+                rule: 'line-too-long'
+            });
+        }
+
+        // console.log check (skip if inside a string literal on the same line)
+        if (/\bconsole\.log\s*\(/i.test(line)) {
+            issues.push({
+                file: fileName,
+                line: lineNumber,
+                column: line.indexOf('console') + 1,
+                severity: vscode.DiagnosticSeverity.Warning,
+                message: 'console.log should not be used in production code',
+                rule: 'no-console-log'
+            });
+        }
+
+        // TODO / FIXME hints
+        const todoMatch = /\b(TODO|FIXME|HACK)\b/.exec(line);
+        if (todoMatch) {
+            issues.push({
+                file: fileName,
+                line: lineNumber,
+                column: todoMatch.index + 1,
+                severity: vscode.DiagnosticSeverity.Information,
+                message: `${todoMatch[1]} comment found: ${line.trim()}`,
+                rule: 'todo-comment'
+            });
+        }
+
+        // Trailing backslash
+        if (line.trimEnd().endsWith('\\')) {
+            issues.push({
+                file: fileName,
+                line: lineNumber,
+                column: line.length,
+                severity: vscode.DiagnosticSeverity.Warning,
+                message: 'Line ends with trailing backslash',
+                rule: 'trailing-backslash'
+            });
+        }
+    }
+
+    return issues;
 }
 
 async function performMcmdReview(document: vscode.TextDocument): Promise<McmdIssue[]> {
@@ -114,12 +262,18 @@ async function performMcmdReview(document: vscode.TextDocument): Promise<McmdIss
 
         issues.push(...checkSelectFromNonView(sqlCode, fileName, linesBeforeSql));
         sqlCode = removeComments(sqlCode);
+        // MOCA embeds SQL inside [...] bracket blocks. Anything outside the brackets
+        // is MOCA command verbs (e.g. "create receive invoice from master", "process lc
+        // inb dto update") and must NOT be treated as SQL. Strip it while preserving line
+        // numbers so per-line checks below only see real SQL.
+        sqlCode = stripOutsideBrackets(sqlCode);
+        const linesBeforeSqlAdjusted = linesBeforeSql;
 
-        issues.push(...checkComplexSql(sqlCode, nameContent, fileName, linesBeforeSql));
-        issues.push(...checkInsertUpdateDelete(sqlCode, nameContent, fileName, linesBeforeSql));
-        issues.push(...checkInClause(sqlCode, fileName, linesBeforeSql));
-        issues.push(...checkSubSelectInSelectClause(sqlCode, fileName, linesBeforeSql));
-        issues.push(...checkDivisionWithDecode(sqlCode, fileName, linesBeforeSql));
+        issues.push(...checkComplexSql(sqlCode, nameContent, fileName, linesBeforeSqlAdjusted));
+        issues.push(...checkInsertUpdateDelete(sqlCode, nameContent, fileName, linesBeforeSqlAdjusted));
+        issues.push(...checkInClause(sqlCode, fileName, linesBeforeSqlAdjusted));
+        issues.push(...checkSubSelectInSelectClause(sqlCode, fileName, linesBeforeSqlAdjusted));
+        issues.push(...checkDivisionWithDecode(sqlCode, fileName, linesBeforeSqlAdjusted));
         issues.push(...checkListGetNoDml(sqlCode, nameContent, fileName));
     }
 
@@ -686,36 +840,143 @@ function checkListGetNoDml(sqlCode: string, commandName: string, file: string): 
 
 function checkSelectFromNonView(sqlCode: string, file: string, lineOffset: number = 0): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const lines = sqlCode.split('\n');
 
-    const fromPattern = /\bfrom\s+(\w+)/gi;
+    // MOCA embeds SQL inside [...] bracket blocks. The word "from" also appears in
+    // MOCA command verbs outside the brackets (e.g. "create receive invoice from master"),
+    // which must NOT be treated as a SQL "FROM <table>". Only scan inside bracket blocks.
+    const blocks = extractBracketBlocks(sqlCode);
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const lineNumber = i + 1;
+    for (const block of blocks) {
+        const blockStartLine = sqlCode.substring(0, block.startIndex).split('\n').length - 1;
+        const lines = block.content.split('\n');
 
         const fromPatternLocal = /\bfrom\s+(\w+)/gi;
-        let match;
-        while ((match = fromPatternLocal.exec(line)) !== null) {
-            const tableName = match[1];
-            if (!tableName.toLowerCase().endsWith('_view')) {
-                const codeBeforeFrom = lines.slice(0, i + 1).join('\n');
-                if (hasViewCommentInCode(codeBeforeFrom)) {
-                    continue;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const lineNumber = i + 1 + blockStartLine;
+
+            let match;
+            while ((match = fromPatternLocal.exec(line)) !== null) {
+                const tableName = match[1];
+                if (!tableName.toLowerCase().endsWith('_view')) {
+                    const codeBeforeFrom = sqlCode.substring(0, block.startIndex + match.index + line.length);
+                    if (hasViewCommentInCode(codeBeforeFrom)) {
+                        continue;
+                    }
+                    issues.push({
+                        file,
+                        line: lineNumber + lineOffset,
+                        column: match.index + 1,
+                        severity: vscode.DiagnosticSeverity.Warning,
+                        message: `SELECT FROM table '${tableName}' that does not end with '_view'. Please add a comment to explain why you are selecting from a non-view table.`,
+                        rule: 'select-from-non-view'
+                    });
                 }
-                issues.push({
-                    file,
-                    line: lineNumber + lineOffset,
-                    column: match.index + 1,
-                    severity: vscode.DiagnosticSeverity.Warning,
-                    message: `SELECT FROM table '${tableName}' that does not end with '_view'. Please add a comment to explain why you are selecting from a non-view table.`,
-                    rule: 'select-from-non-view'
-                });
             }
         }
     }
 
     return issues;
+}
+
+interface BracketBlock {
+    startIndex: number;  // absolute index in sqlCode of the '['
+    content: string;      // text inside the brackets (excluding the brackets themselves)
+}
+
+/**
+ * Extract all top-level [...] bracket blocks from the code. MOCA uses these to wrap
+ * embedded SQL. Nested brackets are not split (the inner brackets are part of the SQL).
+ */
+function extractBracketBlocks(code: string): BracketBlock[] {
+    const blocks: BracketBlock[] = [];
+    let i = 0;
+    while (i < code.length) {
+        const open = code.indexOf('[', i);
+        if (open === -1) {
+            break;
+        }
+        // find the matching close bracket (no nested [] splitting; SQL may contain [
+        // for things like pckwrk[...], but the outer bracket block is what we want).
+        // We scan forward balancing only '[' and ']' that are at the bracket-block level.
+        let depth = 1;
+        let j = open + 1;
+        while (j < code.length && depth > 0) {
+            if (code[j] === '[') {
+                depth++;
+            } else if (code[j] === ']') {
+                depth--;
+            }
+            if (depth === 0) {
+                break;
+            }
+            j++;
+        }
+        if (depth === 0) {
+            blocks.push({
+                startIndex: open,
+                content: code.substring(open + 1, j)
+            });
+            i = j + 1;
+        } else {
+            i = open + 1;
+        }
+    }
+    return blocks;
+}
+
+/**
+ * Replace all text OUTSIDE [...] bracket blocks with empty lines (preserving newlines
+ * and total line count). MOCA embeds SQL only inside the brackets; everything outside is
+ * MOCA command verbs and must not be treated as SQL for syntax/usage checks.
+ * Brackets themselves are also removed; only the bracket content remains on its line.
+ */
+function stripOutsideBrackets(code: string): string {
+    const result: string[] = [];
+    let i = 0;
+    const flushOutside = (start: number, end: number) => {
+        // Replace the outside-chunk with empty lines, preserving every newline.
+        for (let k = start; k < end; k++) {
+            if (code[k] === '\n') {
+                result.push('\n');
+            } else {
+                // keep nothing for non-newline chars outside brackets
+            }
+        }
+    };
+    while (i < code.length) {
+        const open = code.indexOf('[', i);
+        if (open === -1) {
+            flushOutside(i, code.length);
+            break;
+        }
+        // chars before this '[' are outside a bracket
+        flushOutside(i, open);
+        // skip the '['
+        let depth = 1;
+        let j = open + 1;
+        while (j < code.length && depth > 0) {
+            if (code[j] === '[') {
+                depth++;
+            } else if (code[j] === ']') {
+                depth--;
+            }
+            if (depth === 0) {
+                break;
+            }
+            j++;
+        }
+        if (depth === 0) {
+            // copy bracket content (between '[' and ']')
+            result.push(code.substring(open + 1, j));
+            i = j + 1;
+        } else {
+            // unmatched bracket; treat rest as outside
+            flushOutside(open, code.length);
+            break;
+        }
+    }
+    return result.join('');
 }
 
 function hasViewCommentInCode(code: string): boolean {
@@ -761,6 +1022,29 @@ function showIssuesInProblemsPanel(issues: McmdIssue[]): void {
     }
 
     vscode.window.showInformationMessage(`Found ${issues.length} issues in .mcmd files. Check the Problems panel.`);
+}
+
+/**
+ * Search git history on the current branch for commits containing the given ticket number,
+ * and return a deduplicated list of changed .mcmd file paths (relative to repo root).
+ */
+function getGitChangedFiles(ticket: string, workspaceRoot: string): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+        const gitCmd = `git log --grep="${ticket}" --name-only --pretty=format:"---FILE---"`;
+        exec(gitCmd, { cwd: workspaceRoot, maxBuffer: 10 * 1024 * 1024 }, (error: Error | null, stdout: string, _stderr: string) => {
+            if (error) {
+                reject(new Error(`Git command failed: ${error.message}`));
+                return;
+            }
+            const files: string[] = [...new Set(
+                stdout.split('---FILE---')
+                    .flatMap((chunk: string) => chunk.split('\n'))
+                    .map((s: string) => s.trim())
+                    .filter((s: string) => s.length > 0)
+            )];
+            resolve(files);
+        });
+    });
 }
 
 export function deactivate() {

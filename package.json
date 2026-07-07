@@ -11,7 +11,8 @@
   ],
   "activationEvents": [
     "onCommand:code-reviewer.reviewFile",
-    "onCommand:code-reviewer.reviewProject"
+    "onCommand:code-reviewer.reviewProject",
+    "onCommand:code-reviewer.reviewByJiraTicket"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -23,6 +24,10 @@
       {
         "command": "code-reviewer.reviewProject",
         "title": "Code Reviewer: Review Project"
+      },
+      {
+        "command": "code-reviewer.reviewByJiraTicket",
+        "title": "Code Reviewer: Review by Jira Ticket"
       }
     ],
     "configuration": {
