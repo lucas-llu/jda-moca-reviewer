@@ -166,10 +166,27 @@ interface McmdIssue {
 }
 
 /**
- * Basic file review for non-.mcmd files. Checks line length, console.log usage,
- * TODO/FIXME hints, and trailing backslashes — applicable to any source file type.
+ * Basic file review for source-code files (non-.mcmd). Checks line length, console.log
+ * usage, TODO/FIXME hints, and trailing backslashes. Skips data/config files like .csv,
+ * .seq, .pof where these rules are not meaningful.
  */
 async function performFileReview(document: vscode.TextDocument): Promise<McmdIssue[]> {
+    // Only review source-code files; skip data/config/binary files
+    const sourceExts = new Set([
+        '.js', '.ts', '.jsx', '.tsx', '.java', '.py', '.rb', '.go', '.rs',
+        '.c', '.cpp', '.h', '.hpp', '.cs', '.swift', '.kt', '.scala',
+        '.xml', '.html', '.css', '.scss', '.less',
+        '.json', '.yaml', '.yml', '.toml',
+        '.sh', '.bat', '.ps1', '.gradle', '.properties',
+        '.sql', '.groovy', '.jsp', '.asp', '.php',
+        '.action',          // MOCA web action files (Groovy/Java-like)
+        '.md', '.txt',      // documentation
+    ]);
+    const ext = path.extname(document.fileName).toLowerCase();
+    if (!sourceExts.has(ext)) {
+        return [];
+    }
+
     const issues: McmdIssue[] = [];
     const fileName = document.fileName;
     const lines = document.getText().split('\n');
