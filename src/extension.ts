@@ -166,9 +166,9 @@ interface McmdIssue {
 }
 
 /**
- * Basic file review for source-code files (non-.mcmd). Checks line length, console.log
- * usage, TODO/FIXME hints, and trailing backslashes. Skips data/config files like .csv,
- * .seq, .pof where these rules are not meaningful.
+ * Basic file review for source-code files (non-.mcmd). Checks console.log
+ * usage, TODO/FIXME hints, and trailing backslashes. Skips data/config files
+ * like .csv, .seq, .pof where these rules are not meaningful.
  */
 async function performFileReview(document: vscode.TextDocument): Promise<McmdIssue[]> {
     // Only review source-code files; skip data/config/binary files
@@ -190,25 +190,12 @@ async function performFileReview(document: vscode.TextDocument): Promise<McmdIss
     const issues: McmdIssue[] = [];
     const fileName = document.fileName;
     const lines = document.getText().split('\n');
-    const maxLineLength = 120;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lineNumber = i + 1;
 
-        // Line length check
-        if (line.length > maxLineLength) {
-            issues.push({
-                file: fileName,
-                line: lineNumber,
-                column: maxLineLength + 1,
-                severity: vscode.DiagnosticSeverity.Warning,
-                message: `Line exceeds ${maxLineLength} characters (${line.length})`,
-                rule: 'line-too-long'
-            });
-        }
-
-        // console.log check (skip if inside a string literal on the same line)
+        // console.log check
         if (/\bconsole\.log\s*\(/i.test(line)) {
             issues.push({
                 file: fileName,
