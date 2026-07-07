@@ -113,9 +113,15 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            // Separate .mcmd files (full review) from other files (basic review)
+            // Only review .mcmd files as defined in the PRD
             const mcmdFiles = changedFiles.filter(f => f.endsWith('.mcmd'));
-            const otherFiles = changedFiles.filter(f => !f.endsWith('.mcmd'));
+
+            if (mcmdFiles.length === 0) {
+                vscode.window.showInformationMessage(
+                    `No .mcmd files found in ${changedFiles.length} changed file(s) for ticket "${ticket.trim()}"`
+                );
+                return;
+            }
 
             diagnosticCollection.clear();
             const allIssues: McmdIssue[] = [];
@@ -131,21 +137,9 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
 
-            for (const relativePath of otherFiles) {
-                const absolutePath = path.join(workspaceRoot, relativePath);
-                try {
-                    const document = await vscode.workspace.openTextDocument(absolutePath);
-                    const issues = await performFileReview(document);
-                    allIssues.push(...issues);
-                } catch {
-                    console.log(`Skipping file (may be deleted): ${absolutePath}`);
-                }
-            }
-
-            const totalCount = mcmdFiles.length + otherFiles.length;
             if (allIssues.length === 0) {
                 vscode.window.showInformationMessage(
-                    `No issues found in ${totalCount} file(s) from ticket "${ticket.trim()}".`
+                    `No issues found in ${mcmdFiles.length} .mcmd file(s) for ticket "${ticket.trim()}"`
                 );
             } else {
                 showIssuesInProblemsPanel(allIssues);
@@ -163,77 +157,6 @@ interface McmdIssue {
     severity: vscode.DiagnosticSeverity;
     message: string;
     rule: string;
-}
-
-/**
- * Basic file review for source-code files (non-.mcmd). Checks console.log
- * usage, TODO/FIXME hints, and trailing backslashes. Skips data/config files
- * like .csv, .seq, .pof where these rules are not meaningful.
- */
-async function performFileReview(document: vscode.TextDocument): Promise<McmdIssue[]> {
-    // Only review source-code files; skip data/config/binary files
-    const sourceExts = new Set([
-        '.js', '.ts', '.jsx', '.tsx', '.java', '.py', '.rb', '.go', '.rs',
-        '.c', '.cpp', '.h', '.hpp', '.cs', '.swift', '.kt', '.scala',
-        '.xml', '.html', '.css', '.scss', '.less',
-        '.json', '.yaml', '.yml', '.toml',
-        '.sh', '.bat', '.ps1', '.gradle', '.properties',
-        '.sql', '.groovy', '.jsp', '.asp', '.php',
-        '.action',          // MOCA web action files (Groovy/Java-like)
-        '.md', '.txt',      // documentation
-    ]);
-    const ext = path.extname(document.fileName).toLowerCase();
-    if (!sourceExts.has(ext)) {
-        return [];
-    }
-
-    const issues: McmdIssue[] = [];
-    const fileName = document.fileName;
-    const lines = document.getText().split('\n');
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const lineNumber = i + 1;
-
-        // console.log check
-        if (/\bconsole\.log\s*\(/i.test(line)) {
-            issues.push({
-                file: fileName,
-                line: lineNumber,
-                column: line.indexOf('console') + 1,
-                severity: vscode.DiagnosticSeverity.Warning,
-                message: 'console.log should not be used in production code',
-                rule: 'no-console-log'
-            });
-        }
-
-        // TODO / FIXME hints
-        const todoMatch = /\b(TODO|FIXME|HACK)\b/.exec(line);
-        if (todoMatch) {
-            issues.push({
-                file: fileName,
-                line: lineNumber,
-                column: todoMatch.index + 1,
-                severity: vscode.DiagnosticSeverity.Information,
-                message: `${todoMatch[1]} comment found: ${line.trim()}`,
-                rule: 'todo-comment'
-            });
-        }
-
-        // Trailing backslash
-        if (line.trimEnd().endsWith('\\')) {
-            issues.push({
-                file: fileName,
-                line: lineNumber,
-                column: line.length,
-                severity: vscode.DiagnosticSeverity.Warning,
-                message: 'Line ends with trailing backslash',
-                rule: 'trailing-backslash'
-            });
-        }
-    }
-
-    return issues;
 }
 
 async function performMcmdReview(document: vscode.TextDocument): Promise<McmdIssue[]> {
