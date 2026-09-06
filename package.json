@@ -1,8 +1,8 @@
 {
   "name": "code-reviewer",
   "displayName": "Code Reviewer - MOCA 命令审查",
-  "description": "审查 .mcmd 文件的编码规范，支持按 Jira Ticket 筛选变更文件审查",
-  "version": "0.0.1",
+  "description": "审查 .mcmd/.jrxml 文件的编码规范，支持按 Jira Ticket 筛选变更文件审查",
+  "version": "0.0.3",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -12,7 +12,8 @@
   "activationEvents": [
     "onCommand:code-reviewer.reviewFile",
     "onCommand:code-reviewer.reviewProject",
-    "onCommand:code-reviewer.reviewByJiraTicket"
+    "onCommand:code-reviewer.reviewByJiraTicket",
+    "onCommand:code-reviewer.reviewJrxml"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -28,6 +29,10 @@
       {
         "command": "code-reviewer.reviewByJiraTicket",
         "title": "Code Reviewer: Review by Jira Ticket"
+      },
+      {
+        "command": "code-reviewer.reviewJrxml",
+        "title": "Code Reviewer: Review Current .jrxml File"
       }
     ],
     "configuration": {
@@ -50,7 +55,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "test": "npm run compile && node --require ./test/vscode-mock.cjs --test test/extension.test.cjs test/improvements.test.cjs test/unimplemented.test.cjs test/modules.test.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
