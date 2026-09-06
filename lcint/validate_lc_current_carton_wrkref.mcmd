@@ -1,0 +1,44 @@
+<command>
+<name>validate lc current carton wrkref</name>
+<description>validate lc current carton wrkref</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+list pick work
+ where wrkref = @wrkref_ctn
+   and wrktyp = 'K'
+   and list_id = @list_id
+   and rownum = 1 catch(@?)
+|
+if (@? = 0)
+{
+    publish data
+     where wrkref = @wrkref_ctn
+}
+else
+{
+    publish data
+     where wrkref = @wrkref_list
+}
+
+
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-60987
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to validate lc current carton wrkref.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

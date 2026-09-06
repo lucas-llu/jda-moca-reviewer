@@ -1,0 +1,70 @@
+<command>
+<name>process lc order inventory rotation update</name>
+<description>process lc order inventory rotation update</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+{
+    list order lines
+    where wh_id = @wh_id
+      and client_id = @client_id
+      and ordnum = @ordnum
+    |
+    publish data
+      where ordlin = @ordlin
+        and ordsln = @ordsln
+        and prtnum = @prtnum
+        and prt_client_id = @prt_client_id
+}
+|
+/* Retrieve data from some tables directly since there is no view for these tables.
+ * There is no existing command, use select statement instead.
+ * get the item velocity.
+ */
+[select velzon
+   from prtmst_view
+  where prtnum = @prtnum
+    and prt_client_id = @prt_client_id
+    and wh_id = @wh_id]
+|
+list policies
+ where polcod = 'LC_PICK'
+   and polvar = 'FIFDTE_VALIDATION'
+   and polval = 'INSTALL'
+   and rtstr1 = @client_id
+   and rtstr2 = @velzon
+   and wh_id = @wh_id
+   and rtnum1 = 1 catch(-1403)
+|
+if(@? = -1403)
+{
+    change record
+     where table = 'ord_line'
+       and ordnum = @ordnum
+       and client_id = @client_id
+       and wh_id = @wh_id
+       and ordlin = @ordlin
+       and ordsln = @ordsln
+       and ordinv = 'LOCATION-ORDER-BY'
+}
+;
+noop
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-63062
+    @author Reko/Steven Chen
+    @version 1.0.0
+    @since 2026-03-17
+    <p>
+    This command is used to update the ord_line.ordinv if fast-moving item.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

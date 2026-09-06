@@ -1,0 +1,50 @@
+<command>
+<name>process lc order status download</name>
+<description>process lc order status download</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+list policies
+ where polcod = 'LC_OUTBOUND'
+   and polvar = 'ORDER_READY'
+   and polval = 'ENABLED'
+   and wh_id = @wh_id
+   and rtstr1 = @client_id
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    list lc order ready ordtyp
+     where ordnum = @ordnum
+       and wh_id = @wh_id
+       and client_id = @client_id catch(-1403)
+    |
+    if (@? = 0)
+    {
+        process lc outbound order ready
+         where wh_id = @wh_id
+           and client_id = @client_id
+           and ordnum = @ordnum
+           and order_status = 'DOWNLOAD'
+    }
+}
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58488
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-14
+    <p>
+    This command is used to process lc order status download.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

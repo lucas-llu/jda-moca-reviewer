@@ -1,0 +1,69 @@
+{
+  "name": "code-reviewer",
+  "displayName": "JDA MOCA Code Reviewer",
+  "description": "Review JDA/Blue Yonder MOCA commands, triggers, database, CSV/CTL, and report/label artifacts in VS Code",
+  "version": "0.0.3",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:code-reviewer.reviewFile",
+    "onCommand:code-reviewer.reviewProject",
+    "onCommand:code-reviewer.reviewByJiraTicket",
+    "onCommand:code-reviewer.reviewJrxml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "code-reviewer.reviewFile",
+        "title": "Code Reviewer: Review Current File"
+      },
+      {
+        "command": "code-reviewer.reviewProject",
+        "title": "Code Reviewer: Review Project"
+      },
+      {
+        "command": "code-reviewer.reviewByJiraTicket",
+        "title": "Code Reviewer: Review by Jira Ticket"
+      },
+      {
+        "command": "code-reviewer.reviewJrxml",
+        "title": "Code Reviewer: Review Current .jrxml File"
+      }
+    ],
+    "configuration": {
+      "title": "Code Reviewer",
+      "properties": {
+        "codeReviewer.enableAutoReview": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable automatic code review on file save"
+        },
+        "codeReviewer.reviewOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Review code when file is opened"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "npm run compile && node --require ./test/vscode-mock.cjs --test test/extension.test.cjs test/improvements.test.cjs test/unimplemented.test.cjs test/modules.test.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.0"
+  }
+}

@@ -1,0 +1,66 @@
+<command>
+  <name>check lc weight check carton need inspection</name>
+  <description>check lc weight check carton need inspection</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+get lc weight check policy condition
+ where client_id = @client_id
+   and wh_id = @wh_id
+   and weight_diff = @weight_diff
+   and prtnum_in_clause = @prtnum_in_clause
+   and custmor = @custmor
+   and usr_id = @usr_id
+   and lp_weight = @lp_weight >> res
+|
+if (rowcount(@res) = 0)
+{
+    publish data
+     where policy_condition = 'PERFECT'
+       and check_flag = 0
+}
+else
+{
+    convert column results to string
+     where colnam = 'policy_condition'
+       and res = @res
+       and separator = ','
+    |
+    publish data
+     where policy_condition = @result_string
+    |
+    if (@policy_condition like 'OUT_WEIGHT_THRESHOLD%')
+    {
+        publish data
+         where policy_condition = 'OUT_WEIGHT_THRESHOLD'
+           and check_flag = 2
+    }
+    else
+    {
+        publish data
+         where policy_condition = @policy_condition
+           and check_flag = 1
+    }
+}
+
+]]>    
+  </local-syntax>
+  <argument name="wh_id" required="yes" datatype="string">Warehouse ID</argument>
+  <argument name="client_id" required="yes" datatype="string">Client ID</argument>
+  <argument name="weight_diff" required="yes" datatype="float">Weight Difference</argument>
+  <argument name="lp_weight" required="yes" datatype="float">Lightest Product Weight</argument>
+  <argument name="usr_id" required="yes" datatype="string">User ID</argument>
+  <argument name="prtnum_in_clause" required="yes" datatype="string">Prtnum In Clause</argument>
+  <argument name="custmor" required="yes" datatype="string">Customer Number</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2025-10-17
+      SWIFTLEX-57791
+      check lc weight check carton need inspection
+      an example of prtnum_in_clause: IN ('ITEM02','ITEM01')
+    </remarks>
+  </documentation>
+</command>

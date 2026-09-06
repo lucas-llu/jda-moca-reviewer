@@ -1,0 +1,46 @@
+<command>
+
+<name>validate lc uin order cancel block</name>
+
+<description>validate lc uin order cancel block</description>
+
+<type>Local Syntax</type>
+
+<local-syntax>
+<![CDATA[
+
+list pick work
+  where ordnum = @ordnum
+    and client_id = @client_id
+    and wh_id = @wh_id
+    and appqty > 0 catch(-1403)
+|
+if (@? = 0)
+{
+    publish data
+     where blkval = 'T'
+}
+else
+{
+    publish data
+     where blkval = 'F'
+}
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58488
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-12-15
+    <p>
+        This command is used to validate lc uin order cancel block.
+    </p>
+]]>
+</remarks>
+
+</documentation>
+</command>

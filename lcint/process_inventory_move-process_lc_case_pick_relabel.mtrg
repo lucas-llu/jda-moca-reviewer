@@ -1,0 +1,59 @@
+<trigger>
+<name>process lc case pick relabel</name>
+<on-command>process inventory move</on-command>
+<fire-sequence>19000</fire-sequence>
+<local-syntax>
+<![CDATA[
+
+process lc case pick relabel
+ where srcloc = @srcloc
+   and srclod = @srclod
+   and srcsub = @srcsub
+   and srcdtl = @srcdtl
+   and prtnum = @prtnum
+   and prt_client_id = @prt_client_id
+   and rpl_invsts = @rpl_invsts
+   and srcqty = @srcqty
+   and src_catch_qty = @src_catch_qty
+   and dstloc = @dstloc
+   and dstlod = @dstlod
+   and dstsub = @dstsub
+   and newdst = @newdst
+   and untcas = @untcas
+   and untpak = @untpak
+   and srcref = @srcref
+   and usr_id = @usr_id
+   and devcod = @devcod
+   and actcod = @actcod
+   and oprcod = @oprcod
+   and sernum_outcap = @sernum_outcap
+   and sernum_sublmov = @sernum_sublmov
+   and wh_id = @wh_id
+   and sub_asset_typ = @sub_asset_typ
+   and asset_typ = @asset_typ
+   and ign_restrict = @ign_restrict
+   and lotnum = @lotnum
+   and uomcod = @uomcod
+   and ftpcod = @ftpcod
+   and can_sub_catch_flg = @can_sub_catch_flg
+   and spcind = @spcind
+   and delay_flg = @delay_flg
+   and pick_to_lvl = @pick_to_lvl
+   and reqnum = @reqnum
+   and phyflg = @phyflg
+
+]]>
+</local-syntax>
+<documentation>
+<remarks>
+<![CDATA[
+  <p>
+   Creation Story : SWIFTLEX-60057
+   Author : Lucas Lu
+   Date : 2025-12-05
+   This trigger is used to process lc case pick relabel.
+  </p>
+]]>
+</remarks>
+</documentation>
+</trigger>

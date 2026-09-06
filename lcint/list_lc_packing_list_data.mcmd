@@ -1,0 +1,87 @@
+<command>
+<name>list lc packing list data</name>
+<description>list lc packing list data</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+{
+    list shipment lines
+     where ship_id = @ship_id
+       and wh_id = @wh_id
+       and rownum = 1
+    |
+    publish data
+     where ordnum = @ordnum
+}
+|
+list lc packing list address data
+ where ship_id = @ship_id
+   and wh_id = @wh_id
+   and ordnum = @ordnum catch(-1403)
+|
+list policies
+ where polcod = 'LC_PACK_LIST'
+   and polvar = 'FIELD'
+   and polval = 'SHOW_QR_CODE'
+   and rtstr1 = @client_id
+   and wh_id = nvl(@wh_id, @@wh_id)
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    publish data
+     where d_flag = 1
+}
+|
+list policies
+ where polcod = 'LC_PACK_LIST'
+   and polvar = 'FIELD'
+   and polval = 'LOGO_FILE_NAME'
+   and wh_id = @wh_id
+   and rtstr1 = @client_id catch(-1403) >> res_logo
+|
+if (@? = 0)
+{
+    publish top rows
+     where res = @res_logo
+       and rows = 1
+    |
+    publish data
+     where logo = 'reports/' || @rtstr2
+}
+|
+list lc packing list summary data
+ where wh_id = @wh_id
+   and ship_id = @ship_id
+|
+filter data
+ where moca_filter_level = 6
+   and hu_cnt = @hu_cnt
+   and tol_grswgt = @tol_grswgt || ' KG'
+   and tol_netwgt = @tol_netwgt || ' KG'
+   and tol_vol = @tol_vol || ' CCM'
+   and tol_sub = @hu_cnt
+   and logo = @logo
+   and d_flag = @d_flag
+   and wh_id = @wh_id
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-60323
+    @author Reko/Lydia Luo
+    @version 1.0.0
+    @since 2025-11-20
+
+    <p>
+        This command is used to list packing list data.
+    </p>
+]]>
+</remarks>
+
+</documentation>
+</command>

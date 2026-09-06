@@ -1,0 +1,83 @@
+<command>
+<name>validate lc serial capture aggregation</name>
+<description>validate lc serial capture aggregation</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+list lc serial capture inventory
+ where lodnum = @dstlod
+   and subnum = @dstsub
+|
+validate key exists
+ where table = 'pckwrk_dtl'
+   and key = 'subnum,wrktyp'
+   and subnum = @subnum
+   and wrktyp = 'K' catch(@?)
+|
+if (@? <> 0)
+{
+    validate key exists
+     where table = 'usr_uc_prtmst_cust_ref'
+       and key = 'prtnum,prt_client_id,wh_id_tmpl,qualifier,value'
+       and prtnum = @prtnum
+       and prt_client_id = @client_id
+       and wh_id_tmpl = @wh_id
+       and qualifier = 'AGG_SCAN'
+       and value = '1' catch(@?)
+    |
+    if (@? = 0)
+    {
+        list policies
+         where polcod = 'LC_SERIAL_CAPTURE'
+           and polvar = 'AGGREGATION_SERIAL'
+           and polval = 'INSTALLED'
+           and wh_id = @wh_id
+           and rtstr1 = @client_id
+           and rtnum1 = 1 catch(-1403)
+        |
+        if (@? = 0)
+        {
+            execute server command
+             where cmd = "create work where oprcod = 'ASC' and lodlvl = 'S' and  lodnum =  '" || @dstsub || "' and wh_id = '" || @wh_id || "' and srcloc = '" || @srcloc || "' and asg_usr_id = nvl('" || @usr_id || "','" || @@usr_id || "')"
+               and inline = 0
+        }
+    }
+    else
+    {
+        process lc create direct work for serial number capture
+         where subnum = @subnum
+           and client_id = @client_id
+           and wh_id = nvl(@wh_id, @@wh_id)
+           and dstsub = @dstsub
+           and srcloc = @srcloc
+    }
+}
+else
+{
+    process lc create direct work for serial number capture
+     where subnum = @subnum
+       and client_id = @client_id
+       and wh_id = nvl(@wh_id, @@wh_id)
+       and dstsub = @dstsub
+       and srcloc = @srcloc
+}
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-60057
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-11-20
+    <p>
+    This command is used to validate lc serial capture aggregation.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

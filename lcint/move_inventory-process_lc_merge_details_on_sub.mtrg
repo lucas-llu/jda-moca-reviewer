@@ -1,0 +1,20 @@
+<trigger>
+<name>process lc merge details on sub</name>
+<on-command>move inventory</on-command>
+<fire-sequence>100000</fire-sequence>
+<local-syntax>
+<![CDATA[
+
+process lc merge details on sub
+]]>
+</local-syntax>
+<documentation>
+<remarks>
+<![CDATA[
+  <p>
+    Command will merge split details on sub
+  </p>
+]]>
+</remarks>
+</documentation>
+</trigger>

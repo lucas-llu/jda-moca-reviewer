@@ -1,0 +1,88 @@
+<command>
+  <name>list lc weight details in inner pack</name>
+  <description>list lc weight details in inner pack</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+/* No existing MOCA list command, use select statement instead.
+ * Retrieve data from some tables directly since there is no view for these tables. */
+[select row_number() over(order by tbl.prtnum) as seq,
+        tbl.prtnum,
+        tbl.untqty,
+        tbl.ea_grswgt grswgt,
+        decode(ip_untqty, 0, 0, floor(untqty / ip_untqty) *ip_grswgt) + (untqty - decode(ip_untqty, 0, 0, floor(untqty / ip_untqty) *ip_untqty)) *ea_grswgt total_grswgt,
+        tbl.ea_netwgt netwgt,
+        decode(ip_untqty, 0, 0, floor(untqty / ip_untqty) *ip_netwgt) + (untqty - decode(ip_untqty, 0, 0, floor(untqty / ip_untqty) *ip_untqty)) *ea_netwgt total_netwgt,
+        tbl.subnum,
+        tbl.ctncod,
+        tbl.ctnwgt,
+        tbl.ctnwlm,
+        tbl.custmor,
+        tbl.client_id,
+        min(tbl.ea_netwgt) over(partition by tbl.subnum) lp_weight,
+        sum(decode(ip_untqty, 0, 0, floor(untqty / ip_untqty) *ip_grswgt) + (untqty - decode(ip_untqty, 0, 0, floor(untqty / ip_untqty) *ip_untqty)) *ea_grswgt) over(partition by tbl.subnum) total_weight_without_box
+   from (select ipv.prtnum,
+                ipv.subnum,
+                sum(ipv.untqty) untqty,
+                nvl(prt_ip.grswgt / 1000, 0) ip_grswgt,
+                nvl(prt_ip.netwgt / 1000, 0) ip_netwgt,
+                nvl(prt_ip.untqty, 0) ip_untqty,
+                prt_ea.grswgt / 1000 ea_grswgt,
+                prt_ea.netwgt / 1000 ea_netwgt,
+                prt_ea.untqty ea_untqty,
+                pckwrk_view.ctncod,
+                ctnmst.ctnwgt / 1000 ctnwgt,
+                ctnmst.ctnwlm / 1000 ctnwlm,
+                ipv.stcust custmor,
+                ipv.client_id
+           from inventory_pckwrk_view ipv
+           left
+           join prtftp_dtl prt_ip
+             on prt_ip.prtnum = ipv.prtnum
+            and prt_ip.ftpcod = ipv.ftpcod
+            and prt_ip.prt_client_id = ipv.prt_client_id
+            and prt_ip.wh_id = ipv.wh_id
+            and prt_ip.uomcod = 'IP'
+           join prtftp_dtl prt_ea
+             on prt_ea.prtnum = ipv.prtnum
+            and prt_ea.ftpcod = ipv.ftpcod
+            and prt_ea.prt_client_id = ipv.prt_client_id
+            and prt_ea.wh_id = ipv.wh_id
+            and prt_ea.uomcod = 'EA'
+           join pckwrk_view
+             on pckwrk_view.subnum = ipv.subnum
+            and pckwrk_view.wrktyp = 'K'
+           join ctnmst
+             on ctnmst.ctncod = pckwrk_view.ctncod
+            and ctnmst.wh_id = pckwrk_view.wh_id
+          where ipv.subnum = @subnum
+            and ipv.wh_id = @wh_id
+          group by ipv.prtnum,
+                prt_ip.grswgt,
+                prt_ip.netwgt,
+                prt_ea.grswgt,
+                prt_ea.netwgt,
+                pckwrk_view.ctncod,
+                ctnmst.ctnwgt,
+                ctnmst.ctnwlm,
+                prt_ip.untqty,
+                prt_ea.untqty,
+                ipv.subnum,
+                ipv.stcust,
+                ipv.client_id) tbl]
+
+]]>    
+  </local-syntax>
+  <argument name="wh_id" required="yes" datatype="string">Warehouse ID</argument>
+  <argument name="subnum" required="yes" datatype="string">Sub-LPN</argument>
+  <documentation>
+    <remarks>
+      @author Lucas Lu
+      @since 2025-12-24
+      SWIFTLEX-57791
+      list lc weight details in inner pack
+    </remarks>
+  </documentation>
+</command>

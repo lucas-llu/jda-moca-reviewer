@@ -1,0 +1,34 @@
+<command>
+  <name>list lc stoloc movement zone code</name>
+  <description>list lc stoloc movement zone code</description>
+  <type>Local Syntax</type>
+  <local-syntax> 
+<![CDATA[
+
+/* No existing MOCA list command, use select statement instead.
+ * Retrieve data from some tables directly since there is no view for these tables. */
+[select mov_zone.mov_zone_cod
+   from locmst
+   join mov_zone
+     on mov_zone.mov_zone_id = locmst.mov_zone_id
+  where stoloc = @stoloc
+    and locmst.wh_id = @wh_id]
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-60057
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to list lc stoloc movement zone code.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

@@ -1,0 +1,42 @@
+<command>
+<name>process lc carton pick validation</name>
+<description>process lc carton pick validation</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+validate lc current carton wrkref
+ where wrkref_list = @wrkref_list
+   and wrkref_ctn = @wrkref_ctn
+|
+validate lc carton prefix
+ where subnum = @subnum
+   and wrkref = @wrkref
+   and carton = @carton
+   and wh_id = @wh_id
+   and list_id = @list_id;
+validate lc current carton wrkref
+ where wrkref_list = @wrkref_list
+   and wrkref_ctn = @wrkref_ctn
+|
+execute server command
+ where cmd = "process lc skip ctnnum validation where subnum ='" || @subnum || "' and wrkref = '" || @wrkref || "' and wh_id = '" || @wh_id || "'"
+   and inline = 0
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58487
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-11-14
+    <p>
+    This command is used to process lc carton pick validation.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

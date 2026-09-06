@@ -1,0 +1,48 @@
+<command>
+<name>validate lc sscc relabel movement zone</name>
+<description>validate lc sscc relabel movement zone</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+get translated inventory identifier
+ where id = @id
+   and wh_id = nvl(@wh_id, @@wh_id)
+|
+list lc stoloc movement zone code
+ where stoloc = @stoloc
+   and wh_id = @wh_id
+|
+list policies
+ where polcod = 'LC_RELABEL'
+   and polvar = 'VALIDATION'
+   and polval = 'MOVEMENT_ZONE'
+   and rtstr1 = @client_id
+   and rtstr2 = @mov_zone_cod
+   and wh_id = nvl(@wh_id, @@wh_id)
+   and rtnum1 = 1
+   and rownum = 1 catch(@?)
+|
+if (@? != 0)
+{
+    set return status
+     where code = 4100004
+}
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-67708
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2026-04-09
+    <p>
+    This command is used to validate lc sscc relabel movement zone.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

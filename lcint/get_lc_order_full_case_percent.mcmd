@@ -1,0 +1,43 @@
+<command>
+  <name>get lc order full case percent</name>
+  <description>get lc order full case percent</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+/*No existing MOCA list command, use select statement instead.
+ *Retrieve data from some tables directly since there is no view for these tables.*/
+[select sum(ol.ordqty / pdl.untqty) as column1
+   from ord_line ol
+   join prtftp pf
+     on ol.prtnum = pf.prtnum
+    and ol.prt_client_id = pf.prt_client_id
+    and ol.wh_id = pf.wh_id
+   join prtftp_dtl pdl
+     on pf.prtnum = pdl.prtnum
+    and pf.prt_client_id = pdl.prt_client_id
+    and pf.wh_id = pdl.wh_id
+    and pf.ftpcod = pdl.ftpcod
+    and pf.defftp_flg = 1
+    and pdl.cas_flg = 1
+  where ol.ordnum = @ordnum
+    and ol.client_id = @client_id
+    and ol.wh_id = @wh_id
+  group by ol.ordlin,
+        ol.ordsln]
+
+]]>    
+  </local-syntax>
+  <argument name="wh_id" required="yes" datatype="string">Warehouse ID</argument>
+  <argument name="ordnum" required="yes" datatype="string">Order Number</argument>
+  <argument name="client_id" required="yes" datatype="string">Client ID</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2025-11-06
+      SWIFTLEX-57791
+      get lc order full case percent
+    </remarks>
+  </documentation>
+</command>

@@ -1,0 +1,84 @@
+<command>
+  <name>list lc carton ready to complete for pick enhancement</name>
+  <description>list lc carton ready to complete for pick enhancement</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+
+/* No list command use select instead.
+ * Not use validate key exists here as we need to validate by 'or' and substr column.
+ * Validate by subnum as the column will be not null only for the record whose wrktyp is 'K' of the carton pick in pckwrk_view.
+ * And for carton pick we may get multiple records in pckwrk_view, but only one record whose wrktyp is 'K'.
+ * Not need to validate ctnnum column as it will be not null only for the record whose wrktyp is 'P' of the carton pick in pckwrk_view.
+ * And for one carton pick, the column subnum of the record whose wrktyp is 'K' equals to the column ctnnum of the record whose wrktyp is 'P'. 
+ */
+[select 'x'
+   from inventory_view iv
+  where iv.subnum = substr(@subnum, @new_carton_start_position)
+    and iv.wh_id = nvl(@wh_id, @@wh_id)
+    and not exists(select 'x'
+                     from inventory_view iv2
+                    where iv2.wrkref = iv.wrkref
+                      and iv2.subnum = @subnum)
+ union all
+ select 'x'
+   from inventory_view iv
+  where substr(iv.subnum, @new_carton_start_position) = substr(@subnum, @new_carton_start_position)
+    and iv.wh_id = nvl(@wh_id, @@wh_id)
+    and not exists(select 'x'
+                     from inventory_view iv2
+                    where iv2.wrkref = iv.wrkref
+                      and iv2.subnum = @subnum)
+ union all
+ select 'x'
+   from pckwrk_view pv1
+  where pv1.subnum = @subnum
+    and pv1.wh_id = nvl(@wh_id, @@wh_id)
+    and not exists(select 'x'
+                     from pckwrk_view pv2
+                    where pv2.wrkref = pv1.wrkref
+                      and pv2.subnum = @subnum)
+ union all
+ select 'x'
+   from pckwrk_view pv1
+  where pv1.subnum = substr(@subnum, @new_carton_start_position)
+    and pv1.wh_id = nvl(@wh_id, @@wh_id)
+    and not exists(select 'x'
+                     from pckwrk_view pv2
+                    where pv2.wrkref = pv1.wrkref
+                      and pv2.subnum = @subnum)
+ union all
+ select 'x'
+   from pckwrk_view pv1
+  where substr(pv1.subnum, @new_carton_start_position) = substr(@subnum, @new_carton_start_position)
+    and pv1.wh_id = nvl(@wh_id, @@wh_id)
+    and not exists(select 'x'
+                     from pckwrk_view pv2
+                    where pv2.wrkref = pv1.wrkref
+                      and pv2.subnum = @subnum)
+ union all
+ /* validate if the sscc number is used by an existing inventory */
+ select 'x'
+   from inventory_view iv
+  where iv.subnum = @subnum
+    and iv.wh_id = nvl(@wh_id, @@wh_id)
+    and not exists(select 'x'
+                     from inventory_view iv2
+                    where iv2.wrkref = iv.wrkref
+                      and iv2.subnum = @subnum)]
+
+]]>    
+  </local-syntax>
+  <argument name="wh_id" required="yes" datatype="string">Warehouse ID</argument>
+  <argument name="subnum" required="yes" datatype="string">Sub-LPN</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2026-04-07
+      SWIFTLEX-67708
+      The command is used to list lc carton ready to complete for pick enhancement.
+    </remarks>
+  </documentation>
+</command>

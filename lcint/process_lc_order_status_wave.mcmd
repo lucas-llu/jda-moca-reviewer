@@ -1,0 +1,82 @@
+<command>
+<name>process lc order status wave</name>
+<description>process lc order status wave</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+list orders for wave
+ where @+schbat
+|
+list policies
+ where polcod = 'LC_OUTBOUND'
+   and polvar = 'ORDER_READY'
+   and polval = 'ENABLED'
+   and wh_id = @wh_id
+   and rtstr1 = @client_id
+   and rtnum1 = 1 catch(-1403)
+|
+if (@? = 0)
+{
+    list lc order ready ordtyp
+     where ordnum = @ordnum
+       and wh_id = @wh_id
+       and client_id = @client_id catch(-1403)
+    |
+    if (@? = 0)
+    {
+        list short orders
+         where ordnum = @ordnum catch(-1403)
+        |
+        if (@? = 0)
+        {
+            list policies
+             where polcod = 'LC_OUTBOUND'
+               and polvar = 'ORDER_READY'
+               and polval = 'ALLOW_SHORT_SEND'
+               and wh_id = @wh_id
+               and rtstr1 = @client_id
+               and rtstr2 = @ordtyp
+               and rtnum1 = 1 catch(-1403)
+            |
+            if (@? = 0)
+            {
+                publish data
+                 where allo_flg = 1
+            }
+        }
+        else
+        {
+            publish data
+             where allo_flg = 1
+        }
+        |
+        if (@allo_flg = 1)
+        {
+            process lc outbound order ready
+             where wh_id = @wh_id
+               and client_id = @client_id
+               and ordnum = @ordnum
+               and order_status = 'WAVE'
+        }
+    }
+}
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58488
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-14
+    <p>
+    This command is used to process lc order status wave.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

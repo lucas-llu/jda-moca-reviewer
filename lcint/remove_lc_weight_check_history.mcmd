@@ -1,0 +1,24 @@
+<command>
+  <name>remove lc weight check history</name>
+  <description>remove lc weight check history</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+remove record
+ where table = 'usr_lc_weight_check_hist'
+   and history_id = @history_id
+
+]]>    
+  </local-syntax>
+  <argument name="history_id" required="yes" datatype="string">Weight Check History Id</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2025-10-21
+      SWIFTLEX-57791
+      remove lc weight check history
+    </remarks>
+  </documentation>
+</command>

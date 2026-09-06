@@ -1,0 +1,37 @@
+<command>
+<name>process lc serial capture request</name>
+<description>process lc serial capture request</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+get integrator system id
+ where systyp = 'WMD'
+|
+sl_log event
+ where evt_id = 'LC-AGG-SERIAL-CAPTURE'
+   and sys_id = @sys_id
+   and ifd_data_ptr = NULL
+   and wh_id = @wh_id
+   and invtid = @invtid
+   and pallet_type = @pallet_type
+   and scan_id = @scan_id
+
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-60057
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-11-20
+    <p>
+    This command is used to process lc serial capture request.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

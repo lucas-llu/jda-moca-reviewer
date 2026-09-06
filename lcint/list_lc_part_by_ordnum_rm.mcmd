@@ -1,0 +1,152 @@
+<command>
+<name>list lc part by ordnum rm</name>
+<description>list lc part by ordnum rm</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+/* No existing MOCA list command, use select statement instead. */
+[select prtmst.prt_client_id,
+        prtmst.comcod,
+        prtmst.subcfg,
+        prtmst.scfpos,
+        prtmst.dtlcfg,
+        prtmst.dcfpos,
+        prtmst.typcod,
+        prtmst.prtfam,
+        prtmst.lodlvl,
+        prtmst.orgflg,
+        prtmst.revflg,
+        prtmst.lotflg,
+        prtmst.untcst,
+        prtmst.reoqty,
+        prtmst.reopnt,
+        prtmst.stkuom,
+        prtmst.abccod,
+        prtmst.fifwin,
+        prtmst.velzon,
+        prtmst.rcvsts,
+        prtmst.rcvflg,
+        prtmst.prdflg,
+        prtmst.ltlcls,
+        prtmst.wip_prtflg,
+        prtmst.dte_code,
+        prtmst.age_pflnam,
+        prtmst.catch_cod,
+        prtmst.catch_unttyp,
+        prtmst.catch_untwgt,
+        prtmst.catch_untcst,
+        prtmst.min_catch_qty,
+        prtmst.max_catch_qty,
+        prtmst.cnzflg,
+        prtmst.cnzamt,
+        prtmst.timcod,
+        prtmst.stccod,
+        prtmst.parcel_flg,
+        prtmst.hazmat_flg,
+        prtmst.nstcls,
+        prtmst.insflg,
+        prtmst.ser_typ,
+        prtmst.ser_lvl,
+        prtmst.wgtcod,
+        prtmst.lod_tag_encode,
+        prtmst.sub_tag_encode,
+        prtmst.co_prefix_len,
+        prtmst.time_to_warn_for_exp,
+        prtmst.prtadjflg,
+        prtmst.cntbck_ena_flg,
+        prtmst.cnt_thr_cst,
+        prtmst.prtstyle,
+        prtmst.prtfit,
+        prtmst.prtcolor,
+        prtmst.prtsize,
+        prtmst.pck_steal_flg,
+        prtmst.crncy_code,
+        prtmst.box_pck_flg,
+        prtmst.avg_catch,
+        prtmst.dspuom,
+        prtmst.rptuom,
+        prtmst.ignore_con_flg,
+        prtmst.dept_cod,
+        prtmst.thresh_pck_var,
+        prtmst.dte_win_typ,
+        prtmst.cstms_itm_typ,
+        prtmst.cstms_crncy,
+        prtmst.dflt_orgcod,
+        prtmst.cstms_vat_cod,
+        prtmst.dty_stmp_trk_flg,
+        prtmst.cstms_cst,
+        prtmst.cstms_cmmdty_cod,
+        prtmst.attr_str1,
+        prtmst.attr_str2,
+        prtmst.attr_str3,
+        prtmst.attr_str4,
+        prtmst.attr_str5,
+        prtmst.attr_str6,
+        prtmst.attr_str7,
+        prtmst.attr_str8,
+        prtmst.attr_str9,
+        prtmst.attr_str10,
+        prtmst.attr_str11,
+        prtmst.attr_str12,
+        prtmst.attr_str13,
+        prtmst.attr_str14,
+        prtmst.attr_str15,
+        prtmst.attr_str16,
+        prtmst.attr_str17,
+        prtmst.attr_str18,
+        prtmst.attr_int1,
+        prtmst.attr_int2,
+        prtmst.attr_int3,
+        prtmst.attr_int4,
+        prtmst.attr_int5,
+        prtmst.attr_flt1,
+        prtmst.attr_flt2,
+        prtmst.attr_flt3,
+        prtmst.attr_dte1,
+        prtmst.attr_dte2,
+        prtmst.shelf_life,
+        prtmst.shelf_timecode,
+        prtmst.shp_res_lot,
+        prtmst.prthrcy,
+        prtmst.prtnum,
+        prtmst.dsp_prtnum,
+        prtmst.lot_fmt_id,
+        prtmst.allow_xdktyp_rpl_flg
+   from prtmst_view prtmst
+   join ord_line ol
+     on prtmst.prtnum = ol.prtnum
+    and prtmst.prt_client_id = ol.prt_client_id
+    and prtmst.wh_id = ol.wh_id
+    and ol.cancelled_flg <> '1'
+   left
+   join shipment_line sl
+     on ol.client_id = sl.client_id
+    and ol.ordnum = sl.ordnum
+    and ol.ordlin = sl.ordlin
+    and ol.ordsln = sl.ordsln
+    and ol.wh_id = sl.wh_id
+    and sl.linsts <> 'b'
+    and (sl.inpqty + sl.stgqty + sl.oviqty + sl.shpqty) <> '0'
+  where ol.ordnum = @ordnum
+    and ol.wh_id = @wh_id
+    and ol.client_id = @client_id
+    and @+sl.ship_id]
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-58488
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-14
+    <p>
+    This command is used to list lc part by ordnum rm.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

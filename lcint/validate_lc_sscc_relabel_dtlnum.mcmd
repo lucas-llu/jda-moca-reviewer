@@ -1,0 +1,32 @@
+<command>
+<name>validate lc sscc relabel dtlnum</name>
+<description>validate lc sscc relabel dtlnum</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+list lc package client id
+ where dtlnum = @dtlnum
+|
+validate lc sscc relabel movement zone
+ where id = @dtlnum 
+   and wh_id = nvl(@wh_id, @@wh_id)
+   and client_id = @client_id
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-67708
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2026-04-09
+    <p>
+    This command is used to validate lc sscc relabel dtlnum.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

@@ -1,0 +1,84 @@
+<command>
+<name>process lc merge details on sub</name>
+<description>process lc merge details on sub</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+     list policies
+    where polcod = 'LC_OUTBOUND'
+      and polvar = 'MERGE_DETAIL_BY_SUB'
+      and polval = 'INSTALL'
+      and wh_id = nvl(@wh_id, @@wh_id)
+      and rtstr1 = @prt_client_id
+      and rtnum1 = 1 catch(-1403)
+    |
+    if(@? = 0)
+    {
+        if(@actcod = 'UPCK' and @dstloc = 'PERM-SHP-LOC' )
+        {
+            /* No existing MOCA list command, use select statement instead.
+             * Retrieve data from some tables directly since there is no view for these tables.
+             * Get the total qty by sub
+             */
+           [select subnum,
+                   sum(untqty) total_qty
+              from inventory_view 
+              join locmst
+                on locmst.stoloc = inventory_view.stoloc
+               and locmst.wh_id = inventory_view.wh_id
+             where phdflg = 1
+               and inventory_view.lodnum = nvl(@dstlod, @lodnum)
+             group by subnum
+             having count(*) > 1] catch(-1403)
+            |
+            if(@? = 0)
+            {
+                /* No existing MOCA list command, use select statement instead.
+                 * Retrieve data from some tables directly since there is no view for these tables.
+                 * Get the 1st dtlnum to keep.
+                 */
+                [select min(dtlnum) min_dtlnum from inventory_view where subnum = @subnum]
+                |
+                execute server command
+                  where cmd = "change record where table = 'invdtl' and phdflg = 0 and dtlnum = '" || @min_dtlnum || "' and untqty = '" || @total_qty || "'"
+                    and inline = 0
+                |
+                {
+                    /* No existing MOCA list command, use select statement instead.
+                     * Retrieve data from some tables directly since there is no view for these tables.
+                     * Get the dtlnum which is from the same subnum and not same with min_dtlnum.
+                     */
+                    [select dtlnum
+                       from invdtl
+                      where subnum = @subnum
+                        and dtlnum != @min_dtlnum] catch(-1403)
+                    |
+                    if(@? = 0)
+                    {
+                        remove record
+                         where table = 'invdtl'
+                           and dtlnum = @dtlnum
+                    }
+                } >> rs
+            }
+        }
+    }
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-63062
+    @author Reko/Steven Chen
+    @version 1.0.0
+    @since 2026-03-17
+    <p>
+    This command is used to merge exploded inventory detail after unpick.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

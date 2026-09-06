@@ -1,0 +1,42 @@
+<command>
+  <name>purge lc weight check history</name>
+  <description>purge lc weight check history</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+/* Using direct SQL from table to check the existence of the record */
+/* No standard list command or view exists */
+[select history_id
+   from usr_lc_weight_check_hist
+  where last_upd_dt < (sysdate - @keep_days)] catch(-1403)
+|
+if (@? = 0)
+{
+    remove lc weight check history
+     where history_id = @history_id
+    |
+    list lc weight check history detail
+     where history_id = @history_id catch(-1403)
+    |
+    if (@? = 0)
+    {
+        remove lc weight check history detail
+         where history_dtl_id = @history_dtl_id
+           and history_id = @history_id
+    }
+}
+
+]]>    
+  </local-syntax>
+  <argument name="keep_days" required="yes" datatype="int">Keep Days</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2025-10-30
+      SWIFTLEX-57791
+      The command is used to delete weight check history record and weight check history detail record according to keep days.
+    </remarks>
+  </documentation>
+</command>

@@ -1,0 +1,140 @@
+<command>
+<name>validate lc carton prefix</name>
+<description>validate lc carton prefix</description>
+<type>Local Syntax</type>
+<local-syntax>
+<![CDATA[
+
+list lc wrkref client id
+ where wrkref = @wrkref
+|
+publish data
+ where cur_wrkref = @wrkref
+|
+{
+    list policies
+     where polcod = 'LC_SSCC_NUM'
+       and polvar = 'TOTAL_LENGTH_VALIDATION'
+       and polval = 'INSTALL'
+       and rtstr1 = @client_id
+       and rtnum1 = 1
+       and wh_id = nvl(@wh_id, @@wh_id) catch(-1403)
+    |
+    if (@? = 0)
+    {
+        list policies
+         where polcod = 'LC_SSCC_NUM'
+           and polvar = 'TOTAL_LENGTH'
+           and polval = 'LENGTH'
+           and rtstr1 = @client_id
+           and rtnum1 = len(@subnum)
+           and wh_id = nvl(@wh_id, @@wh_id) catch(-1403)
+        |
+        if (@? <> 0)
+        {
+            set return status
+             where status = 4100009
+        }
+    }
+}
+|
+{
+    list policies
+     where polcod = 'LC_SSCC_NUM'
+       and polvar = 'DIGIT_NUM_VALIDATION'
+       and polval = 'INSTALL'
+       and rtstr1 = @client_id
+       and rtnum1 = 1
+       and wh_id = nvl(@wh_id, @@wh_id) catch(-1403)
+    |
+    if (@? = 0)
+    {
+        publish data
+         where prefix_len = @rtstr2
+        |
+        list policies
+         where polcod = 'LC_SSCC_NUM'
+           and polvar = 'DIGIT_NUM'
+           and polval = 'NUMBER'
+           and rtstr1 = @client_id
+           and rtstr2 = substr(@sscc_num, 3, @prefix_len)
+           and wh_id = nvl(@wh_id, @@wh_id) catch(-1403)
+        |
+        if (@? <> 0)
+        {
+            set return status
+             where status = 4100010
+        }
+    }
+}
+|
+{
+    list policies
+     where polcod = 'LC_CARTON'
+       and polvar = 'CTNNUM_VALIDATION'
+       and polval = 'INSTALL'
+       and wh_id = nvl(@wh_id, @@wh_id)
+       and rtstr1 = @client_id
+       and rtnum1 = 1 catch(-1403)
+    |
+    if (@? = 0)
+    {
+        if (@carton <> substr(@subnum, 1, len(@carton)))
+        {
+            set return status
+             where status = 4100014
+        }
+        else
+        {
+            publish data
+             where new_carton_number = substr(@subnum, len(@carton) + 1)
+               and new_carton_start_position = len(@carton) + 1
+        }
+    }
+    |
+    publish data
+     where new_carton_number = @new_carton_number
+       and new_carton_start_position = @new_carton_start_position
+}
+|
+{
+    list policies
+     where polcod = 'LC_CARTON_PICK'
+       and polvar = 'SKIP_CARTON_VALIDATION'
+       and polval = 'INSTALL'
+       and wh_id = nvl(@wh_id, @@wh_id)
+       and rtstr1 = @client_id
+       and rtnum1 = 1 catch(-1403)
+    |
+    if (@? = 0)
+    {
+        list lc carton ready to complete
+         where subnum = @subnum
+           and new_carton_start_position = @new_carton_start_position catch(@?) >> complete_res
+        |
+        if (rowcount(@complete_res) > 0)
+        {
+            set return status
+             where status = 4100013
+               and ctnnum = @subnum
+        }
+    }
+}
+
+]]>
+</local-syntax>
+
+<documentation>
+<remarks>
+<![CDATA[
+    K+N reference for change: SWIFTLEX-60987
+    @author Reko/Lucas Lu
+    @version 1.0.0
+    @since 2025-10-22
+    <p>
+    This command is used to validate lc carton prefix.
+    </p>
+]]>
+</remarks>
+</documentation>
+</command>

@@ -1,0 +1,38 @@
+<command>
+  <name>get lc sscc relabel process invtid next to go</name>
+  <description>get lc sscc relabel process invtid next to go</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+get translated inventory identifier
+ where id = @invtid
+   and wh_id = nvl(@wh_id, @@wh_id) catch(@?)
+|
+if (@? = 0)
+{
+    /* exist, go to relabel */
+    publish data
+     where goto_seqnum = 20
+}
+else
+{
+    /* not exist, go to merge details */
+    publish data
+     where goto_seqnum = 50
+}
+
+]]>    
+  </local-syntax>
+  <argument name="wh_id" datatype="string">Warehouse ID</argument>
+  <argument name="invtid" required="yes" datatype="string">Inventory ID</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2026-04-02
+      SWIFTLEX-67708
+      The command is used to get lc sscc relabel process invtid next to go.
+    </remarks>
+  </documentation>
+</command>

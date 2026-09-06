@@ -1,0 +1,78 @@
+<command>
+  <name>list lc weight details in full case</name>
+  <description>list lc weight details in full case</description>
+  <type>Local Syntax</type>
+  <local-syntax>
+    
+<![CDATA[
+
+/* No existing MOCA list command, use select statement instead.
+ * Retrieve data from some tables directly since there is no view for these tables. */
+[select row_number() over(order by tbl.prtnum) as seq,
+        tbl.prtnum,
+        tbl.untqty,
+        tbl.grswgt,
+        tbl.total_grswgt,
+        tbl.netwgt,
+        tbl.total_netwgt,
+        tbl.subnum,
+        tbl.ctncod,
+        tbl.ctnwgt,
+        tbl.ctnwlm,
+        tbl.custmor,
+        tbl.client_id,
+        min(tbl.netwgt) over(partition by tbl.subnum) lp_weight,
+        sum(tbl.total_grswgt) total_weight_without_box
+   from (select inventory_pckwrk_view.prtnum,
+                inventory_pckwrk_view.subnum,
+                sum(inventory_pckwrk_view.untqty) untqty,
+                prtftp_dtl.grswgt / 1000 grswgt,
+                prtftp_dtl.grswgt / 1000 total_grswgt,
+                prtftp_dtl.netwgt / 1000 netwgt,
+                prtftp_dtl.netwgt / 1000 total_netwgt,
+                null ctncod,
+                null ctnwgt,
+                null ctnwlm,
+                inventory_pckwrk_view.stcust custmor,
+                inventory_pckwrk_view.client_id
+           from inventory_pckwrk_view
+           join prtftp_dtl
+             on prtftp_dtl.prtnum = inventory_pckwrk_view.prtnum
+            and prtftp_dtl.ftpcod = inventory_pckwrk_view.ftpcod
+            and prtftp_dtl.prt_client_id = inventory_pckwrk_view.prt_client_id
+            and prtftp_dtl.wh_id = inventory_pckwrk_view.wh_id
+            and prtftp_dtl.cas_flg = 1
+          where inventory_pckwrk_view.subnum = @subnum
+            and inventory_pckwrk_view.wh_id = @wh_id
+          group by inventory_pckwrk_view.prtnum,
+                prtftp_dtl.grswgt,
+                prtftp_dtl.netwgt,
+                inventory_pckwrk_view.subnum,
+                inventory_pckwrk_view.stcust,
+                inventory_pckwrk_view.client_id) tbl
+  group by tbl.prtnum,
+        tbl.untqty,
+        tbl.grswgt,
+        tbl.total_grswgt,
+        tbl.netwgt,
+        tbl.total_netwgt,
+        tbl.subnum,
+        tbl.ctncod,
+        tbl.ctnwgt,
+        tbl.ctnwlm,
+        tbl.client_id,
+        tbl.custmor]
+
+]]>    
+  </local-syntax>
+  <argument name="wh_id" required="yes" datatype="string">Warehouse ID</argument>
+  <argument name="subnum" required="yes" datatype="string">Sub-LPN</argument>
+  <documentation>
+    <remarks>
+      @author Kevin Wang
+      @since 2025-10-14
+      SWIFTLEX-57791
+      list lc weight details in full case
+    </remarks>
+  </documentation>
+</command>
