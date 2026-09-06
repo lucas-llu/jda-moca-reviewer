@@ -1,7 +1,7 @@
 {
   "name": "code-reviewer",
-  "displayName": "Code Reviewer - MOCA 命令审查",
-  "description": "审查 .mcmd/.jrxml 文件的编码规范，支持按 Jira Ticket 筛选变更文件审查",
+  "displayName": "JDA MOCA Code Reviewer",
+  "description": "Review JDA/Blue Yonder MOCA commands, triggers, database, CSV/CTL, and report/label artifacts in VS Code",
   "version": "0.0.3",
   "engines": {
     "vscode": "^1.85.0"

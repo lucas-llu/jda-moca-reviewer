@@ -1,92 +1,74 @@
-# Code Reviewer
+# JDA MOCA Code Reviewer
 
-一个用于审查 .mcmd 文件的 VSCode 扩展插件。
+## Installation
 
-## 功能特性
+### Install from a VSIX file
 
-- **单文件审查**: 审查当前打开的 .mcmd 文件
-- **项目审查**: 审查整个项目的 .mcmd 文件
-- **Jira Ticket 审查**: 输入 Jira ticket 号，自动搜索当前分支中包含该 ticket 的 commit，审查其中变更的 .mcmd 文件
+1. Build or download `code-reviewer-0.0.3.vsix`.
+2. Open Visual Studio Code.
+3. Open the Extensions view with `Ctrl+Shift+X`.
+4. Select the `...` menu and choose **Install from VSIX...**.
+5. Select the VSIX file and reload Visual Studio Code when prompted.
 
-## 支持的审查规则
-
-### 文件结构检查
-- [Error] 缺少 &lt;name&gt; 标签
-- [Error] 缺少 &lt;description&gt; 标签
-- [Error] 缺少 &lt;type&gt; 标签
-- [Error] 缺少 &lt;local-syntax&gt; 标签或 CDATA 块
-
-### 命名规范
-- [Error] &lt;name&gt; 标签中不能包含大写字母
-- [Error] &lt;name&gt; 标签中不能包含特殊字符
-- [Error] &lt;name&gt; 标签中不能有连续多个空格
-- [Error] 文件名不能包含大写字母
-- [Error] 文件名不能包含空格
-- [Warning] &lt;name&gt; 需要与文件名对应
-- [Warning] &lt;name&gt; 中需要包含 'lc' 前缀
-
-### SQL 规范
-- [Error] Complex SQL 只能出现在 list/get 命令中
-- [Warning] 避免使用 INSERT/UPDATE/DELETE
-- [Error] 禁止使用 IN 子查询（使用 EXISTS 替代）
-- [Error] SELECT 子句中禁止使用子查询
-- [Warning] 除法运算需使用 DECODE 处理除 0 情况
-- [Error] list/get 命令中不能出现 DML 语句
-- [Warning] SELECT FROM 表名应以 _view 结尾
-
-## 安装
-
-1. 下载 `code-reviewer-0.0.1.vsix` 文件
-2. 打开 VSCode
-3. 按 `Ctrl+Shift+X` 打开扩展面板
-4. 点击右上角 `...` 菜单
-5. 选择 **"从 VSIX 安装"** (Install from VSIX)
-6. 选择下载的 `.vsix` 文件
-7. 安装完成后重新加载窗口
-
-## 使用方法
-
-### 审查当前文件
-
-1. 打开任意 .mcmd 文件
-2. 使用快捷键 `Ctrl+Shift+P` 打开命令面板
-3. 输入 "Code Reviewer: Review Current File" 并执行
-
-### 审查整个项目
-
-1. 使用快捷键 `Ctrl+Shift+P` 打开命令面板
-2. 输入 "Code Reviewer: Review Project" 并执行
-
-### 审查 Jira Ticket
-
-1. 使用快捷键 `Ctrl+Shift+P` 打开命令面板
-2. 输入 "Code Reviewer: Review by Jira Ticket" 并执行
-3. 输入 Jira ticket 号（如 SWIFTLEX-51198）
-4. 插件会搜索当前分支中包含该 ticket 号的 commit，找出变更的 .mcmd 文件并审查
-
-### 配置选项
-
-在 VSCode 设置中可以配置以下选项:
-
-- `codeReviewer.enableAutoReview`: 启用保存时自动审查
-- `codeReviewer.reviewOnOpen`: 打开文件时审查代码
-
-## 开发
+### Build from source
 
 ```bash
-# 安装依赖
 npm install
-
-# 编译 TypeScript
+npm test
 npm run compile
-
-# 监听模式 (开发时使用)
-npm run watch
-
-# 打包 .vsix
-vsce package
+npx --yes @vscode/vsce package
 ```
 
-## 许可证
+The generated package is `code-reviewer-0.0.3.vsix`.
+
+## Usage
+
+Open the Command Palette with `Ctrl+Shift+P` and run one of the following commands:
+
+- **Code Reviewer: Review Current File** — review the active `.mcmd`, `.mtrg`, `.jrxml`, `.pof`, database, CSV, CTL, or post-install file when it is in a supported project path.
+- **Code Reviewer: Review Project** — review all supported files in the workspace while excluding `.git`, `node_modules`, `out`, `dist`, and placeholder `.gitkeep` files.
+- **Code Reviewer: Review by Jira Ticket** — enter a Jira key such as `SWIFTLEX-74319`; the extension reviews matching committed changes together with staged, unstaged, and untracked supported files.
+- **Code Reviewer: Review Current .jrxml File** — review the active JasperReport file specifically.
+
+Issues are shown in VS Code's **Problems** panel. Errors block the review result; warnings are advisory and remain visible even when an explanatory comment is present.
+
+## What this extension reviews
+
+This extension reviews JDA/Blue Yonder MOCA local customisations, including:
+
+- **MOCA Commands and Triggers**: `.mcmd` structure, command naming, `lc`/`usr`/`pd` layer classification, BY policy guards, trigger single-command rules, copy markers, SQL complexity, DML usage, subqueries, View usage, division-by-zero protection, bind hints, and related command safety checks.
+- **Database objects**: table, index, sequence, view, and database-trigger naming, prefixes, primary keys, CREATE/ALTER consistency, idempotency, ORCA registration, and index unload dependencies.
+- **CSV and CTL data**: `cust_lvl`, `les_mls_cat` ranges, CSV/CTL dependencies, unload DELETE patterns, Config Action version checks, and post-install `mload_all` coverage.
+- **Reports and Labels**: `.jrxml` report naming and `MOCA_REPORT_CONNECTION` safety, plus `.pof` label naming and `rpt_id` consistency.
+- **Git/Jira workflow**: branch-name validation, ticket-based file selection, rename/delete handling, and duplicate-file removal.
+
+Rules that require external evidence—such as QA/DBA approval, SQL execution-plan analysis, representative-data performance testing, or whether a command is called by Web UI/IFD—remain manual review items and are not generated as plugin diagnostics.
+
+## Supported project paths
+
+The current routing recognizes these project locations:
+
+- `les/db/ddl/**/Tables`
+- `les/db/ddl/**/Indexes`
+- `les/db/ddl/**/Sequences`
+- `les/db/ddl/**/Views`
+- `les/db/ddl/**/Triggers`
+- `les/db/data/**`
+- `les/labels/z140xiII` and `les/reports/z140xiII`
+- `postinstall/**` `isccustom*.sh` scripts
+
+## Development
+
+```bash
+npm install
+npm test
+npm run lint
+npm run compile
+npx --yes @vscode/vsce package
+```
+
+The extension currently exposes the automatic-review settings in its manifest for future integration; the active workflow is command-driven through the Command Palette.
+
+## License
 
 MIT
