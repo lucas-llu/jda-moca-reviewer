@@ -97,6 +97,9 @@ export function activate(context: vscode.ExtensionContext): void {
             return;
         }
         const issues = reviewDocument(document);
+        if (workspaceRoot) {
+            issues.push(...await csvChangeWarnings(workspaceRoot, undefined, document.fileName));
+        }
         if (issues.length === 0) {
             vscode.window.showInformationMessage(`No issues found in the ${kind} file!`);
         } else {
@@ -116,6 +119,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const files = await findReviewableFiles();
         const issues = await reviewFiles(files);
+        issues.push(...await csvChangeWarnings(workspaceRoot));
         if (issues.length === 0) {
             vscode.window.showInformationMessage(`No issues found in ${files.length} reviewable project files!`);
         } else {
@@ -154,11 +158,13 @@ export function activate(context: vscode.ExtensionContext): void {
         const reviewableFiles = changedFiles
             .filter(isReviewableFile)
             .map(relativePath => vscode.Uri.file(path.join(workspaceRoot, relativePath)));
-        if (reviewableFiles.length === 0) {
+        const csvWarnings = await csvChangeWarnings(workspaceRoot, ticket.trim());
+        if (reviewableFiles.length === 0 && csvWarnings.length === 0) {
             vscode.window.showInformationMessage(`No reviewable files found for ticket '${ticket.trim()}'`);
             return;
         }
         const issues = await reviewFiles(reviewableFiles);
+        issues.push(...csvWarnings);
         if (issues.length === 0) {
             vscode.window.showInformationMessage(`No issues found in ${reviewableFiles.length} files for ticket '${ticket.trim()}'`);
         } else {
@@ -269,6 +275,20 @@ function parseGitStatusPaths(stdout: string): string[] {
     return paths;
 }
 
+export async function csvChangeWarnings(workspaceRoot: string, ticket?: string, onlyFile?: string): Promise<McmdIssue[]> {
+    const outputs = await Promise.all([
+        runGitOutput(['diff', 'HEAD', '--name-only', '--diff-filter=MD', '--no-renames', '-z', '--'], workspaceRoot),
+        ticket ? runGitOutput(['log', '--fixed-strings', `--grep=${ticket}`, '--format=',
+            '--name-only', '--diff-filter=MD', '--no-renames', '-m', '-z'], workspaceRoot) : Promise.resolve('')
+    ]).catch(() => [] as string[]);
+    const files = new Set(outputs.flatMap(output => output.split('\0')).filter(Boolean));
+    return [...files].map(relative => path.resolve(workspaceRoot, relative))
+        .filter(file => getReviewKind(file) === 'csv' && (!onlyFile || path.resolve(onlyFile) === file))
+        .map(file => ({ file, line: 1, column: 1, severity: vscode.DiagnosticSeverity.Warning,
+            message: 'Tracked CSV was modified or deleted: primary-key changes or record deletions require a matching unload file; verify unload coverage',
+            rule: 'csv-change-requires-unload' }));
+}
+
 export async function getGitChangedFiles(ticket: string, workspaceRoot: string): Promise<string[]> {
     const [logOutput, statusOutput] = await Promise.all([
         runGitOutput([
@@ -312,6 +332,7 @@ export const __test = {
     parseGitChangedFilesOutput,
     parseGitStatusPaths,
     getGitChangedFiles,
+    csvChangeWarnings,
     findReviewableFiles,
     showIssuesInProblemsPanel
 };

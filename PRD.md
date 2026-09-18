@@ -132,6 +132,9 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
 - 以下 SQL 规则只分析 MOCA `[...]` 内的实际 SQL；注释和字符串字面量中的关键字、运算符不参与判断。
 - [Warning] 使用 `INSERT`、`UPDATE` 或 `DELETE` 时始终报告 Warning。DML 目标是物理表，不执行 `_view` 检查。SQL 必须有紧邻注释并明确提到对应的现有 command，说明为什么不能使用它：INSERT 对应 `create record`，UPDATE 对应 `change record`，DELETE 对应 `remove record`；例如 mass update、更新主键或先查询 key 会造成性能问题。只有普通注释、但没有提到对应 command 时仍视为缺少说明，并额外报告 `[Error]`。
 - [Error] `list`/`get` command 不允许包含任何新增、修改或删除数据库数据的逻辑，包括 `INSERT`、`UPDATE`、`DELETE`。（AC-14）
+- [Warning] SQL 每处 `MAX()` / `MIN()` 调用均提示并发竞态风险，尤其是生成序号或取最大编号时；开发者需注释说明并防止竞态，必要时捕获失败。已有注释或 catch 不消除此 Warning。注释、字符串中的关键字不检测。
+- [Error] 直接 SQL `UPDATE` 必须有对应 SQL 块或包围它的 MOCA 代码块的非空 `catch(...)`；其他语句的 catch、注释或错误码本身不能替代。`SELECT ... FOR UPDATE` 不属于此处的数据更新。除修改主键外优先使用 `change record`；`change record` 的异常处理已完善，不新增 catch 检查或异常处理报错。
+- [Warning] 每次直接 SQL `UPDATE` 均提醒同步赋值审计字段，如 `last_update_usr`、`last_update_time`；即使已赋值也保留提示，字段及赋值正确性由开发者确认。
 - [Error] 禁止 `IN (SELECT ...)` 形式的子查询，必须改用 `EXISTS`。
 - 小型静态值列表允许使用 `IN`，例如 `IN ('A', 'B')`，不产生诊断。
 - [Error] SELECT 子句中禁止使用 sub-select。
@@ -168,6 +171,8 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
 - 数据库对象 tablespace 是否获得 IT Operations/DBA 批准属于人工审查，本阶段插件不检测。（AC-31）
 
 ## 4. CSV 和 CTL 文件相关
+
+- [Warning] 按 Git 变更识别已有 CSV 的修改或删除（包括整个文件删除），每个文件提示一次：修改主键或删除记录必须有配套 unload 文件。不根据单元格中的 update/delete 字样判断，不自动判定主键；新增 CSV 不触发此项。当前文件/项目审查比较工作区（含暂存）与 HEAD；Jira 审查额外包含匹配 Ticket 的历史提交（含 merge）的修改/删除。仅凭 unload 文件存在不取消提示，覆盖范围由开发者确认；无 Git 基线时不产生该提示。
 
 - [Error] `cust_lvl`：LC 仓库必须为 100 或更高；PD 插件仓库不检查该下限。
 - [Error] CSV 文件中不允许包含 SQL。
@@ -221,6 +226,7 @@ PD 插件仓库等效写法：
 - [Error] `rpt_id` 就是 label/report 的文件名；比较时忽略扩展名，但大小写不能忽略。
 - [Error] Report 文件名不得超过 30 个字符（按字符计算），包括主 report 和 sub-report。
 - [Error] Label 文件名不得超过 20 个字符（按字符计算）。
+- [Error] `.pof` Label 文件名必须以 `lc-` 或 `Lc-` 开头，前缀后名称不得为空。`lc-` 后的名称必须全部小写，允许下划线连接，例如 `lc-shipping_label.pof`；`Lc-` 后允许混合大小写，例如 `Lc-KNPalletLabel.pof`。`lc-ContentLbl.pof` 不合法。此前缀规则仅适用于 Label，不适用于 `.jrxml`。
 - sub-report 与普通 report 使用同一套检查，不额外区分。
 
 ### 5.2 JRXML 连接配置
@@ -261,8 +267,9 @@ PD 插件仓库等效写法：
 ## 6. Git 分支名检查
 
 - 在检查任何文件之前，先检查当前 Git branch 名称。
-- [Error] 分支名必须以 `feature/SWIFTLEX-` 开头，例如 `feature/SWIFTLEX-12345_fix`。
-- Ticket 之后只允许英文字母、数字和下划线 `_`；不允许出现 `-`、`/`、`.`、空格和其他符号。
+- `develop` 分支允许直接进行审查，不报分支命名错误（名称须完全匹配）。
+- [Error] 其他分支名必须以 `feature/SWIFTLEX-` 开头，例如 `feature/SWIFTLEX-12345_fix` 或 `feature/SWIFTLEX-12345-fix`。
+- `feature/SWIFTLEX-` 后须有非空内容，只允许英文字母、数字、下划线 `_` 和连字符 `-`，两种连接符可以混用；不允许出现 `/`、`.`、空格和其他符号。
 - 如果分支名不合法，直接报错并终止本次检查。
 
 ## 7. Jira Ticket 代码审查
@@ -295,5 +302,5 @@ PD 插件仓库等效写法：
 
 - TODO：Archive/Purge job 的扩展名、目录和新增检查规则；已有实现保持不变。
 - TODO：历史/备份文件的识别和排除模式。
-- TODO：Git 分支的 detached HEAD、非 Git 及多根工作区行为；分支格式已明确为 `feature/SWIFTLEX-*`，Ticket 后只允许下划线。
+- TODO：Git 分支的 detached HEAD、非 Git 及多根工作区行为；允许 `develop`，feature 分支格式为 `feature/SWIFTLEX-*`，允许下划线和连字符。
 - TODO：Jira 的多根工作区行为；模糊匹配、merge、rename/delete、未提交变更已实现。

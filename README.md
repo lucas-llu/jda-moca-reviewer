@@ -4,7 +4,7 @@
 
 ### Install from a VSIX file
 
-1. Build or download `code-reviewer-0.0.3.vsix`.
+1. Download the `.vsix` asset from [GitHub Releases](https://github.com/lucas-llu/jda-moca-reviewer/releases/latest).
 2. Open Visual Studio Code.
 3. Open the Extensions view with `Ctrl+Shift+X`.
 4. Select the `...` menu and choose **Install from VSIX...**.
@@ -16,10 +16,14 @@
 npm install
 npm test
 npm run compile
-npx --yes @vscode/vsce package
+npx --yes @vscode/vsce@2.15.0 package --no-dependencies --ignoreFile .github/vsix.ignore
 ```
 
-The generated package is `code-reviewer-0.0.3.vsix`.
+The generated package is `code-reviewer-<version>.vsix` (currently `code-reviewer-0.0.4.vsix`).
+
+### Release downloads
+
+Every published version is available on the [Releases page](https://github.com/lucas-llu/jda-moca-reviewer/releases). Version updates go through a pull request. After merging to `main`, GitHub Actions runs the tests, packages the extension and publishes the versioned VSIX. Existing releases are never overwritten.
 
 ## Usage
 

@@ -689,6 +689,44 @@ function hasAdjacentComment(code: string, block: BracketBlock, innerIndex?: numb
     return false;
 }
 
+function hasSqlCatch(code: string, block: BracketBlock): boolean {
+    const mask = maskCommentsAndStrings(code);
+    const caughtAfter = (end: number) => /^\s*catch\s*\(\s*[^\s)][^)]*\)/i.test(mask.slice(end + 1));
+    if (caughtAfter(block.endIndex)) {
+        return true;
+    }
+    // A catch on an enclosing MOCA group also handles the SQL failure.
+    const groups: number[] = [];
+    for (let i = 0; i < block.startIndex; i++) {
+        if (mask[i] === '{') { groups.push(i); }
+        if (mask[i] === '}') { groups.pop(); }
+    }
+    for (const start of groups) {
+        let depth = 1;
+        for (let i = start + 1; i < mask.length; i++) {
+            if (mask[i] === '{') { depth++; }
+            if (mask[i] === '}' && --depth === 0) {
+                if (caughtAfter(i)) { return true; }
+                break;
+            }
+        }
+    }
+    return false;
+}
+
+function checkSqlConcurrency(blocks: BracketBlock[], file: string, source: string, offset: number): McmdIssue[] {
+    const issues: McmdIssue[] = [];
+    for (const block of blocks) {
+        for (const match of maskCommentsAndStrings(block.content).matchAll(/\b(max|min)\s*\(/gi)) {
+            issues.push(issueAt(file, source, offset + block.startIndex + 1 + match.index!,
+                vscode.DiagnosticSeverity.Warning,
+                `${match[1].toUpperCase()}() may introduce race conditions when deriving sequence/max numbers; document concurrency risks and prevent them or catch resulting failures`,
+                'sql-min-max-race-condition'));
+        }
+    }
+    return issues;
+}
+
 function checkDml(
     blocks: BracketBlock[],
     commandName: string,
@@ -705,12 +743,24 @@ function checkDml(
         let missingCommentReported = false;
         while ((match = dml.exec(mask)) !== null) {
             const operationName = match[1].toLowerCase();
+            // SELECT ... FOR UPDATE locks rows but does not assign updated values.
+            if (operationName === 'update' && /\bfor\s*$/i.test(mask.slice(0, match.index))) {
+                continue;
+            }
             const operation = operationName.toUpperCase();
             const absoluteIndex = syntax.contentOffset + block.startIndex + 1 + match.index;
             const expectedCommand = operationName === 'insert'
                 ? 'create record'
                 : operationName === 'update' ? 'change record' : 'remove record';
             issues.push(issueAt(file, source, absoluteIndex, vscode.DiagnosticSeverity.Warning, `${operation} is used; confirm the direct DML is necessary`, `avoid-${operationName}`));
+            if (operationName === 'update') {
+                if (!hasSqlCatch(syntax.content, block)) {
+                    issues.push(issueAt(file, source, absoluteIndex, vscode.DiagnosticSeverity.Error,
+                        'SQL UPDATE requires catch(...) on the SQL block or an enclosing MOCA group; prefer change record except when changing primary keys', 'update-missing-catch'));
+                }
+                issues.push(issueAt(file, source, absoluteIndex, vscode.DiagnosticSeverity.Warning,
+                    'SQL UPDATE: also update audit fields such as last_update_usr and last_update_time', 'update-audit-fields'));
+            }
             if (!adjacentCommentMatches(syntax.content, block, new RegExp(`\\b${expectedCommand.replace(' ', '\\s+')}\\b`, 'i'), match.index) && !missingCommentReported) {
                 issues.push(issueAt(file, source, absoluteIndex, vscode.DiagnosticSeverity.Error, `${operation} requires an adjacent comment explaining why '${expectedCommand}' cannot be used`, 'dml-missing-comment'));
                 missingCommentReported = true;
@@ -1364,6 +1414,7 @@ export function performMcmdReview(document: ReviewDocument): McmdIssue[] {
     issues.push(...checkComplexSql(blocks, name, file, text, syntax.contentOffset));
     issues.push(...checkSelectComments(blocks, syntax, file, text));
     issues.push(...checkDml(blocks, name, file, text, syntax));
+    issues.push(...checkSqlConcurrency(blocks, file, text, syntax.contentOffset));
     issues.push(...checkInSubqueries(blocks, file, text, syntax.contentOffset));
     issues.push(...checkSelectClauseSubqueries(blocks, file, text, syntax.contentOffset));
     issues.push(...checkNonViewTables(blocks, file, text, syntax));
@@ -1408,7 +1459,7 @@ export function performTriggerReview(document: ReviewDocument): McmdIssue[] {
 }
 
 export function validateGitBranchName(branchName: string): McmdIssue[] {
-    if (/^feature\/SWIFTLEX-[A-Za-z0-9_]+$/.test(branchName)) {
+    if (branchName === 'develop' || /^feature\/SWIFTLEX-[A-Za-z0-9_-]+$/.test(branchName)) {
         return [];
     }
     return [{
@@ -1416,7 +1467,7 @@ export function validateGitBranchName(branchName: string): McmdIssue[] {
         line: 1,
         column: 1,
         severity: vscode.DiagnosticSeverity.Error,
-        message: `Git branch name '${branchName}' must match feature/SWIFTLEX-<ticket>_<suffix>; only underscores are allowed after the ticket`,
+        message: `Git branch name '${branchName}' must be develop or match feature/SWIFTLEX-<ticket>[_-]<suffix>; letters, digits, underscores and hyphens are allowed after SWIFTLEX-`,
         rule: 'invalid-branch-name'
     }];
 }
