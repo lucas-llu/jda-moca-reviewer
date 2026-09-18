@@ -8,6 +8,35 @@ const path = require('node:path');
 const vscodeMock = global.__vscodeMock;
 const extension = require('../out/extension.js');
 const rulesApi = extension.__test;
+test('CSV unload warning follows tracked Git modifications/deletions and ticket history', async () => {
+    const os = require('node:os');
+    const { execFileSync } = require('node:child_process');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'moca-csv-git-'));
+    const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+    const dir = path.join(root, 'les/db/data/load/lc');
+    fs.mkdirSync(dir, { recursive: true });
+    git('init');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'Test');
+    for (const name of ['modified.csv', 'deleted.csv', 'unchanged.csv']) {
+        fs.writeFileSync(path.join(dir, name), 'id,value\n1,original\n');
+    }
+    git('add', '.');
+    git('commit', '-m', 'initial');
+    assert.deepEqual(await rulesApi.csvChangeWarnings(root), []);
+    fs.writeFileSync(path.join(dir, 'modified.csv'), 'id,value\n1,changed\n');
+    fs.unlinkSync(path.join(dir, 'deleted.csv'));
+    fs.writeFileSync(path.join(dir, 'new.csv'), 'id,value\n1,new\n');
+    git('add', '.');
+    const warnings = await rulesApi.csvChangeWarnings(root);
+    assert.deepEqual(warnings.map(x => path.basename(x.file)).sort(), ['deleted.csv', 'modified.csv']);
+    assert.ok(warnings.every(x => x.severity === 1 && x.rule === 'csv-change-requires-unload'));
+    assert.equal((await rulesApi.csvChangeWarnings(root, undefined, path.join(dir, 'modified.csv'))).length, 1);
+    git('commit', '-m', 'SWIFTLEX-777 edit CSV');
+    assert.deepEqual(await rulesApi.csvChangeWarnings(root), []);
+    assert.equal((await rulesApi.csvChangeWarnings(root, 'SWIFTLEX-777')).length, 2);
+    assert.deepEqual(await rulesApi.csvChangeWarnings(root, 'SWIFTLEX-999'), []);
+});
 
 const devin02Root = process.env.DEVIN02_ROOT || 'D:\\workspace\\devin02';
 const devin02Lcint = path.join(devin02Root, 'les', 'src', 'cmdsrc', 'lcint');
@@ -134,7 +163,15 @@ describe('.mcmd structure and naming rules', () => {
 
 describe('Git branch character rule', () => {
     test('accepts the allowed character set', () => {
-        assert.deepEqual(rulesApi.validateGitBranchName('feature/SWIFTLEX-123_test'), []);
+        for (const branch of [
+            'develop',
+            'feature/SWIFTLEX-123',
+            'feature/SWIFTLEX-123_test',
+            'feature/SWIFTLEX-123-fix',
+            'feature/SWIFTLEX-123-fix_sql-review'
+        ]) {
+            assert.deepEqual(rulesApi.validateGitBranchName(branch), [], branch);
+        }
     });
 
     test('rejects non feature/SWIFTLEX prefixes and extra symbols', () => {
@@ -142,7 +179,10 @@ describe('Git branch character rule', () => {
             'release/2026.1',
             'feature bad',
             '功能/SWIFTLEX-1',
-            'feature/SWIFTLEX-123-fix',
+            'develop/extra',
+            'develop-fix',
+            'Develop',
+            'feature/SWIFTLEX-',
             'feature/SWIFTLEX-123/extra',
             'feature/SWIFTLEX-123.test'
         ]) {

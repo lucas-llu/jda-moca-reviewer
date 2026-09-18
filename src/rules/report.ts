@@ -41,6 +41,14 @@ export function performLabelReview(document: ReviewDocument): McmdIssue[] {
     const file = document.fileName;
     const baseName = path.basename(file, path.extname(file));
     const issues: McmdIssue[] = [];
+    const labelName = baseName.slice(3);
+    const hasValidPrefix = baseName.startsWith('lc-') || baseName.startsWith('Lc-');
+    if (!hasValidPrefix || labelName.length === 0
+        || (baseName.startsWith('lc-') && labelName !== labelName.toLowerCase())) {
+        issues.push(issueAt(file, text, 0, vscode.DiagnosticSeverity.Error,
+            `Label '${path.basename(file)}' must start with 'lc-' (lowercase name, e.g. lc-shipping_label.pof) or 'Lc-' (mixed case allowed, e.g. Lc-KNPalletLabel.pof), followed by a non-empty name`,
+            'label-filename-convention'));
+    }
     if ([...baseName].length > 20) {
         issues.push(issueAt(file, text, 0, vscode.DiagnosticSeverity.Error, `Label file name '${baseName}' exceeds 20 characters`, 'label-filename-too-long'));
     }

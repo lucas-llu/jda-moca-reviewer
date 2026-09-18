@@ -1,0 +1,9 @@
+**
+!package.json
+!README.md
+!LICENSE
+!out/extension.js
+!out/reviewer.js
+!out/rules/csv.js
+!out/rules/database.js
+!out/rules/report.js

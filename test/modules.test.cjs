@@ -4,6 +4,7 @@ const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vscode = require('vscode');
 
 const rules = require('../out/extension.js').__test;
 
@@ -241,6 +242,36 @@ describe('U-23 CSV/CTL rules', () => {
 });
 
 describe('U-24 report/label rules', () => {
+    test('accepts lowercase lc- labels and mixed-case Lc- labels through document review', () => {
+        for (const folder of ['labels', 'reports']) {
+            for (const name of ['lc-shipping_label', 'Lc-KNPalletLabel', 'Lc-shipping_label', 'lc-label_123']) {
+                const issues = rules.reviewDocument(documentOf(
+                    path.join('D:/workspace/fixtures/les', folder, 'z140xiII', `${name}.pof`),
+                    '^XA\n^XZ'
+                ));
+                assert.deepEqual(issues, [], name);
+            }
+        }
+    });
+
+    test('rejects invalid label prefixes, empty names and mixed case after lc-', () => {
+        for (const name of ['lc-ContentLbl', 'LC-Label', 'lC-Label', 'shipping_label', 'lc_label', 'lc-', 'Lc-']) {
+            const issues = rules.reviewDocument(documentOf(
+                path.join('D:/workspace/fixtures/les/labels/z140xiII', `${name}.pof`),
+                '^XA\n^XZ'
+            ));
+            const namingIssue = issues.find(issue => issue.rule === 'label-filename-convention');
+            assert.ok(namingIssue, name);
+            assert.equal(namingIssue.severity, vscode.DiagnosticSeverity.Error);
+        }
+    });
+
+    test('does not apply label prefixes to jrxml reports', () => {
+        assert.deepEqual(rules.performReportModuleReview(documentOf(
+            'shipping_report.jrxml', '<jasperReport/>'
+        )), []);
+    });
+
     test('rejects a label file name longer than 20 characters', () => {
         const issues = rules.performReportModuleReview(documentOf(
             'D:\\workspace\\fixtures\\les\\labels\\z140xiII\\a234567890123456789012.pof',

@@ -6,6 +6,34 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const rules = require('../out/extension.js').__test;
+describe('SQL concurrency and UPDATE safety', () => {
+    const review = syntax => rules.performMcmdReview(documentOf(fileFor('process lc safety'), mcmd('process lc safety', syntax)));
+    test('warns for each MIN/MAX even with comments and catch', () => {
+        const result = review('/* race condition handled */ [select MAX(id), min(id) from sample_view] catch(@?)');
+        assert.equal(result.filter(x => x.rule === 'sql-min-max-race-condition').length, 2);
+        assert.ok(result.filter(x => x.rule === 'sql-min-max-race-condition').every(x => x.severity === 1));
+        assert.ok(!ids(review("[select 'max(id)' from sample_view /* min(id) */]")).includes('sql-min-max-race-condition'));
+    });
+    test('requires catch for UPDATE and always reminds about audit fields', () => {
+        const sql = '[update sample set last_update_usr = @usr_id, last_update_time = sysdate]';
+        for (const syntax of [sql, sql + ' | list lc other catch(@?)', sql + ' /* catch(@?) */', sql + ' catch()']) {
+            const result = review(syntax);
+            assert.equal(result.find(x => x.rule === 'update-missing-catch').severity, 0);
+            assert.equal(result.find(x => x.rule === 'update-audit-fields').severity, 1);
+        }
+        for (const syntax of [sql + ' catch(-1403)', sql + ' /* note */ catch(@?)', '{ ' + sql + ' | publish data where x = 1 } catch(@?)']) {
+            const result = review(syntax);
+            assert.ok(!ids(result).includes('update-missing-catch'), syntax);
+            assert.ok(ids(result).includes('update-audit-fields'));
+        }
+    });
+    test('does not borrow sibling catches or flag change record and row locks', () => {
+        assert.ok(ids(review('{ publish data where x = 1 } catch(@?) | [update sample set x = 1]')).includes('update-missing-catch'));
+        for (const syntax of ['change record where table = \'sample\'', '[select id from sample_view for update]', "[select 'update sample set x=1' from sample_view]"]) {
+            assert.ok(!review(syntax).some(x => ['update-missing-catch', 'update-audit-fields'].includes(x.rule)));
+        }
+    });
+});
 const devin02Root = process.env.DEVIN02_ROOT || 'D:\\workspace\\devin02';
 const devin02Lcint = path.join(devin02Root, 'les', 'src', 'cmdsrc', 'lcint');
 const amazonPackListCommand = 'D:\\workspace\\swift-pd-customisations-amazon-messaging\\les\\src\\cmdsrc\\pdhs\\process_pd_amzmsg_ish_print_pack_list.mcmd';
