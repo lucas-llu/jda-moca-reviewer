@@ -234,6 +234,9 @@ export function getGitBranchName(workspaceRoot: string): Promise<string> {
 }
 
 export function parseGitChangedFilesOutput(stdout: string): string[] {
+    if (stdout.includes('\0')) {
+        return [...new Set(stdout.split('\0').filter(Boolean))];
+    }
     return [...new Set(
         stdout.split('---FILE---')
             .flatMap(chunk => chunk.split(/\r?\n/))
@@ -261,6 +264,16 @@ function runGitOutput(args: string[], workspaceRoot: string): Promise<string> {
 
 function parseGitStatusPaths(stdout: string): string[] {
     const paths: string[] = [];
+    if (stdout.includes('\0')) {
+        const records = stdout.split('\0');
+        for (let i = 0; i < records.length; i++) {
+            const entry = records[i];
+            if (entry.length < 3) { continue; }
+            paths.push(entry.slice(3));
+            if (/[RC]/.test(entry.slice(0, 2))) { i++; }
+        }
+        return paths;
+    }
     for (const line of stdout.split(/\r?\n/)) {
         const raw = line.length > 3 ? line.substring(3).trim() : '';
         if (!raw) {
@@ -279,7 +292,7 @@ export async function csvChangeWarnings(workspaceRoot: string, ticket?: string, 
     const outputs = await Promise.all([
         runGitOutput(['diff', 'HEAD', '--name-only', '--diff-filter=MD', '--no-renames', '-z', '--'], workspaceRoot),
         ticket ? runGitOutput(['log', '--fixed-strings', `--grep=${ticket}`, '--format=',
-            '--name-only', '--diff-filter=MD', '--no-renames', '-m', '-z'], workspaceRoot) : Promise.resolve('')
+            '--name-only', '--diff-filter=MD', '--no-renames', '--diff-merges=first-parent', '-z'], workspaceRoot) : Promise.resolve('')
     ]).catch(() => [] as string[]);
     const files = new Set(outputs.flatMap(output => output.split('\0')).filter(Boolean));
     return [...files].map(relative => path.resolve(workspaceRoot, relative))
@@ -295,11 +308,13 @@ export async function getGitChangedFiles(ticket: string, workspaceRoot: string):
             'log',
             '--fixed-strings',
             `--grep=${ticket}`,
+            '--diff-merges=first-parent',
             '--name-only',
             '--no-renames',
-            '--pretty=format:---FILE---'
+            '--pretty=format:',
+            '-z'
         ], workspaceRoot),
-        runGitOutput(['status', '--porcelain', '--untracked-files=all'], workspaceRoot)
+        runGitOutput(['status', '--porcelain', '-z', '--untracked-files=all'], workspaceRoot)
     ]);
     const files = new Set<string>();
     for (const relativePath of parseGitChangedFilesOutput(logOutput)) {

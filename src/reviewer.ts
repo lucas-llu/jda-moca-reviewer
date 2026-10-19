@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { maskCode, triviaSpans, adjacentComments, commandCalls, matching, maskXmlComments, xmlElements, xmlAttribute } from './analysis';
 import { performDatabaseReview } from './rules/database';
 import { performCsvModuleReview } from './rules/csv';
 import { performReportModuleReview } from './rules/report';
@@ -8,6 +9,7 @@ import { performReportModuleReview } from './rules/report';
 export interface ReviewDocument {
     fileName: string;
     getText(): string;
+    workspaceRoot?: string;
 }
 
 export interface McmdIssue {
@@ -140,7 +142,7 @@ export function isReviewableFile(fileName: string): boolean {
 
 function findTags(text: string, tagName: string): TagMatch[] {
     const matches: TagMatch[] = [];
-    const searchable = maskCdataBodies(text);
+    const searchable = maskCdataBodies(maskXmlComments(text));
     const pattern = new RegExp(
         `<${tagName}\\b([^>]*?)(?:\\/\\s*>|>([\\s\\S]*?)<\\/${tagName}\\s*>)`,
         'gi'
@@ -320,7 +322,7 @@ export function checkNameMatchesFile(
 
 export function checkFileStructure(text: string, file: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const trimmedWithoutDeclaration = text.replace(/^\s*<\?xml[\s\S]*?\?>/i, '').trim();
+    const trimmedWithoutDeclaration = maskXmlComments(text).replace(/^\s*<\?xml[\s\S]*?\?>/i, '').trim();
     if (!/^<command\b[^>]*>[\s\S]*<\/command>$/.test(trimmedWithoutDeclaration)) {
         issues.push(issueAt(file, text, 0, vscode.DiagnosticSeverity.Error, 'Invalid or incomplete <command> root element', 'invalid-command-root'));
     }
@@ -379,55 +381,7 @@ function getSyntaxContext(text: string): SyntaxContext | undefined {
 }
 
 export function maskCommentsAndStrings(code: string, maskStrings = true): string {
-    const chars = code.split('');
-    let index = 0;
-    const blank = (start: number, end: number) => {
-        for (let i = start; i < end; i++) {
-            if (chars[i] !== '\n' && chars[i] !== '\r') {
-                chars[i] = ' ';
-            }
-        }
-    };
-
-    while (index < code.length) {
-        if (code.startsWith('/*', index)) {
-            const end = code.indexOf('*/', index + 2);
-            const stop = end === -1 ? code.length : end + 2;
-            blank(index, stop);
-            index = stop;
-            continue;
-        }
-        if (code.startsWith('--', index)) {
-            const end = code.indexOf('\n', index + 2);
-            const stop = end === -1 ? code.length : end;
-            blank(index, stop);
-            index = stop;
-            continue;
-        }
-        if (maskStrings && (code[index] === "'" || code[index] === '"')) {
-            const quote = code[index];
-            const start = index++;
-            while (index < code.length) {
-                if (code[index] === quote && code[index + 1] === quote) {
-                    index += 2;
-                    continue;
-                }
-                if (code[index] === quote) {
-                    index++;
-                    break;
-                }
-                if (code[index] === '\\' && index + 1 < code.length) {
-                    index += 2;
-                } else {
-                    index++;
-                }
-            }
-            blank(start, index);
-            continue;
-        }
-        index++;
-    }
-    return chars.join('');
+    return maskCode(code, maskStrings);
 }
 
 export function extractBracketBlocks(code: string): BracketBlock[] {
@@ -503,10 +457,9 @@ function checkLayerAndOverrides(
     if (commandLayer(name) === 'by') {
         const withoutComments = maskCommentsAndStrings(syntax.content, false).trimStart();
         const startsWithPolicy = /^list\s+policies\b/i.test(withoutComments);
-        const hasIfElse = /\bif\s*\(/i.test(withoutComments) && /\belse\b/i.test(withoutComments);
         const namePattern = escapeRegExp(name.trim()).replace(/\s+/g, '\\s+');
         const callsOriginal = new RegExp(`\\^\\s*${namePattern}(?=\\s+where\\b|[\\r\\n|;}]|$)`, 'i').test(withoutComments);
-        if (!startsWithPolicy || !hasIfElse || !callsOriginal) {
+        if (!startsWithPolicy || !callsOriginal || !policyEnclosesCustomization(syntax.content, name)) {
             issues.push(issueAt(
                 file,
                 source,
@@ -518,6 +471,36 @@ function checkLayerAndOverrides(
         }
     }
     return issues;
+}
+
+function policyEnclosesCustomization(code: string, name: string): boolean {
+    const mask = maskCode(code);
+    const header = /\bif\s*\(/i.exec(mask);
+    if (!header) { return false; }
+    const prefix = mask.slice(0, header.index);
+    const setup = commandCalls(prefix);
+    if (!setup.length || !/^\s*list\s+policies\b/i.test(prefix) || /[{}\[\]]/.test(prefix)
+        || setup.slice(1).some(call => !/^publish\s+data\b/i.test(call.mask))) { return false; }
+    const original = (body: string): boolean => {
+        const value = body.trim().replace(/;\s*$/, '').trim();
+        return new RegExp(`^\\^\\s*${escapeRegExp(name.trim()).replace(/\s+/g, '\\s+')}(?=\\s+where\\b|$)`, 'i').test(value)
+            && commandCalls(value).length === 1 && !/[|{}\[\];]/.test(value);
+    };
+    const open = header.index + header[0].lastIndexOf('(');
+    const conditionEnd = matching(mask, open);
+    let cursor = skipWhitespace(mask, conditionEnd + 1);
+    if (conditionEnd < 0 || mask[cursor] !== '{') { return false; }
+    const thenEnd = matching(mask, cursor, '{', '}');
+    if (thenEnd < 0) { return false; }
+    const thenBody = mask.slice(cursor + 1, thenEnd);
+    cursor = skipWhitespace(mask, thenEnd + 1);
+    if (mask[cursor] === '|') { return original(mask.slice(cursor + 1)); }
+    if (!/^else\b/i.test(mask.slice(cursor))) { return false; }
+    cursor = skipWhitespace(mask, cursor + 4);
+    if (mask[cursor] !== '{') { return false; }
+    const elseEnd = matching(mask, cursor, '{', '}');
+    if (elseEnd < 0 || !/^[\s;]*$/.test(mask.slice(elseEnd + 1))) { return false; }
+    return original(mask.slice(cursor + 1, elseEnd)) || original(thenBody);
 }
 
 function checkGroovy(syntax: SyntaxContext, file: string, source: string): McmdIssue[] {
@@ -674,19 +657,8 @@ export function checkComplexSql(
 }
 
 function hasAdjacentComment(code: string, block: BracketBlock, innerIndex?: number): boolean {
-    const beforeBlock = code.slice(0, block.startIndex);
-    const afterBlock = code.slice(block.endIndex + 1);
-    if (/(?:\/\*[\s\S]*?\*\/|--[^\r\n]*)(?:\s*)$/.test(beforeBlock)) {
-        return true;
-    }
-    if (/^\s*(?:\/\*[\s\S]*?\*\/|--[^\r\n]*)/.test(afterBlock)) {
-        return true;
-    }
-    if (innerIndex !== undefined) {
-        const prefix = block.content.slice(0, innerIndex);
-        return /(?:\/\*[\s\S]*?\*\/|--[^\r\n]*)(?:\s*)$/.test(prefix);
-    }
-    return false;
+    return adjacentComments(code, block.startIndex, block.endIndex + 1,
+        innerIndex === undefined ? undefined : block.startIndex + 1 + innerIndex).length > 0;
 }
 
 function hasSqlCatch(code: string, block: BracketBlock): boolean {
@@ -714,14 +686,190 @@ function hasSqlCatch(code: string, block: BracketBlock): boolean {
     return false;
 }
 
-function checkSqlConcurrency(blocks: BracketBlock[], file: string, source: string, offset: number): McmdIssue[] {
+function selectItems(mask: string): { start: number; end: number }[] {
+    const items: { start: number; end: number }[] = [];
+    const depths = parenDepths(mask);
+    for (const select of mask.matchAll(/\bselect\b/gi)) {
+        const start = select.index! + select[0].length;
+        const depth = depths[select.index!];
+        let itemStart = start;
+        for (let i = start; i <= mask.length; i++) {
+            const boundary = i === mask.length || depths[i] < depth
+                || (depths[i] === depth && (mask[i] === ','
+                    || (!/[\w$#]/.test(mask[i - 1] ?? '')
+                        && /^(?:from|into|where|union|group\s+by|order\s+by|having)\b/i.test(mask.slice(i)))));
+            if (!boundary) {
+                continue;
+            }
+            items.push({ start: itemStart, end: i });
+            if (mask[i] !== ',') {
+                break;
+            }
+            itemStart = i + 1;
+        }
+    }
+    return items;
+}
+
+function resultAlias(expression: string): string | undefined {
+    return /(?:\s+as)?\s+([a-z_$#][\w$#]*)$/i.exec(expression.trim())?.[1].toLowerCase();
+}
+
+function hasNumberStep(expression: string, aliases?: ReadonlySet<string>): boolean {
+    const parents: { start: number; end: number }[] = [];
+    const stack: number[] = [];
+    for (let i = 0; i < expression.length; i++) {
+        if (expression[i] === '(') { stack.push(i); }
+        if (expression[i] === ')' && stack.length) {
+            parents.push({ start: stack.pop()!, end: i });
+        }
+    }
+    // Follow operations on the aggregate/variable itself, not unrelated arithmetic
+    // in another CASE branch, a SUBSTR offset, or an NVL default argument.
+    for (const match of expression.matchAll(/\b(max|min)\s*\(|@[a-z_$#][\w$#]*/gi)) {
+        const variable = match[0].startsWith('@');
+        if (aliases ? !variable || !aliases.has(match[0].slice(1).toLowerCase()) : variable) {
+            continue;
+        }
+        let start = match.index!;
+        let end = variable ? start + match[0].length - 1 : findClosingParen(expression, expression.indexOf('(', start));
+        if (end === -1) { continue; }
+        if (!variable) {
+            // MAX(column + 1) is also allocation; arithmetic on SUBSTR/INSTR
+            // positions inside the argument is not. Reuse the same operand walk.
+            const columns = new Set<string>();
+            const argument = expression.slice(expression.indexOf('(', start) + 1, end)
+                .replace(/(@[a-z_$#][\w$#]*)|\b([a-z_$#][\w$#]*(?:\.[a-z_$#][\w$#]*)*)\b(?!\s*\()/gi,
+                    (token, parameter: string | undefined) => {
+                        if (parameter || /^(?:as|case|when|then|else|end|distinct|null)$/i.test(token)) { return token; }
+                        const name = `max_arg_${columns.size}`;
+                        columns.add(name);
+                        return `@${name}`;
+                    });
+            if (columns.size && hasNumberStep(argument, columns)) { return true; }
+        }
+        while (true) {
+            if (/^\s*[+-]\s*(?:[1-9]\d*|@[a-z_$#][\w$#]*)(?![\w$.])/i.test(expression.slice(end + 1))
+                || /(?:^|[^\w$.])(?:[1-9]\d*|@[a-z_$#][\w$#]*)\s*\+\s*$/i.test(expression.slice(0, start))) {
+                return true;
+            }
+            const parent = parents.filter(p => p.start < start && p.end >= end)
+                .sort((a, b) => b.start - a.start)[0];
+            if (!parent) { break; }
+            const fn = /([a-z_$#][\w$#]*)\s*$/i.exec(expression.slice(0, parent.start));
+            if (fn && /^(?:substr|substring|instr|charindex|length|len|count)$/i.test(fn[1])) {
+                break;
+            }
+            start = fn ? fn.index : parent.start;
+            end = parent.end;
+        }
+    }
+    return false;
+}
+
+function splitSqlValues(expression: string): string[] {
+    const depths = parenDepths(expression);
+    const values: string[] = [];
+    let start = 0;
+    for (let i = 0; i <= expression.length; i++) {
+        if (i === expression.length || (expression[i] === ',' && depths[i] === 0)) {
+            values.push(expression.slice(start, i));
+            start = i + 1;
+        }
+    }
+    return values;
+}
+
+function aggregateResultSteppedLater(block: BracketBlock, alias: string, code: string): boolean {
+    const tail = maskCommentsAndStrings(code).slice(block.endIndex + 1);
+    const aliases = new Set([alias.toLowerCase()]);
+    // Keep SQL blocks intact; MOCA pipes/braces delimit the remaining stages.
+    const stages = /\[[^\[\]]*\]|[^|;{}\[\]]+/g;
+    for (const match of tail.matchAll(stages)) {
+        const statement = match[0].trim();
+        const expressions: { value: string; output?: string }[] = [];
+        if (statement.startsWith('[')) {
+            const sql = statement.slice(1, -1);
+            for (const item of selectItems(sql)) {
+                const value = sql.slice(item.start, item.end).trim();
+                expressions.push({ value, output: resultAlias(value) });
+            }
+            if (/^\s*update\b/i.test(sql)) {
+                const set = /\bset\b([\s\S]*?)(?:\bwhere\b|$)/i.exec(sql)?.[1] ?? '';
+                expressions.push(...splitSqlValues(set).map(value => ({ value })));
+            }
+            if (/^\s*insert\b/i.test(sql)) {
+                const values = /\bvalues\s*\(/i.exec(sql);
+                if (values) {
+                    const open = sql.indexOf('(', values.index);
+                    const close = findClosingParen(sql, open);
+                    if (close !== -1) {
+                        expressions.push(...splitSqlValues(sql.slice(open + 1, close)).map(value => ({ value })));
+                    }
+                }
+            }
+        } else if (/^(?:publish\s+data|create\b|add\b|change\b|update\b)/i.test(statement)) {
+            const parameters = /\bwhere\b([\s\S]*)/i.exec(statement)?.[1] ?? '';
+            for (const assignment of parameters.matchAll(/\b([a-z_$#][\w$#]*)\s*=\s*([\s\S]*?)(?=\band\s+[a-z_$#][\w$#]*\s*=|$)/gi)) {
+                expressions.push({ value: assignment[2], output: /^publish\s+data\b/i.test(statement) ? assignment[1].toLowerCase() : undefined });
+            }
+        }
+        const changes = new Map<string, boolean>();
+        for (const expression of expressions) {
+            const dependsOnAggregate = [...aliases].some(name =>
+                new RegExp(`@${escapeRegExp(name)}(?![\\w$#])`, 'i').test(expression.value));
+            if (dependsOnAggregate && hasNumberStep(expression.value, aliases)) {
+                return true;
+            }
+            if (expression.output) {
+                changes.set(expression.output, dependsOnAggregate);
+            }
+        }
+        // Assignments in one publish/SELECT use the input context, then replace outputs.
+        for (const [name, derived] of changes) {
+            if (derived) { aliases.add(name); } else { aliases.delete(name); }
+        }
+        if (aliases.size === 0) {
+            return false;
+        }
+    }
+    return false;
+}
+
+function checkSqlConcurrency(blocks: BracketBlock[], file: string, source: string, syntax: SyntaxContext): McmdIssue[] {
     const issues: McmdIssue[] = [];
     for (const block of blocks) {
-        for (const match of maskCommentsAndStrings(block.content).matchAll(/\b(max|min)\s*\(/gi)) {
-            issues.push(issueAt(file, source, offset + block.startIndex + 1 + match.index!,
+        const mask = maskCommentsAndStrings(block.content);
+        for (const match of mask.matchAll(/\b(max|min)\s*\(/gi)) {
+            const open = mask.indexOf('(', match.index);
+            const close = findClosingParen(mask, open);
+            if (close === -1) {
+                continue;
+            }
+            const item = selectItems(mask).filter(candidate => candidate.start <= match.index! && match.index! < candidate.end)
+                .sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+            const expression = item && mask.slice(item.start, item.end).trim();
+            const alias = expression && resultAlias(expression);
+            const argument = mask.slice(open + 1, close).trim();
+            const column = /^(?:[a-z_$#][\w$#]*\s*\.\s*)*([a-z_$#][\w$#]*)$/i.exec(argument)?.[1];
+            const measurement = (value: string) => /(?:qty|quantity|weight|wgt|height|hgt|width|wdt|volume|price|cost|amount|temperature|percent|timestamp|duration|dte|date|time)$|(?:^|_)untcas$/i.test(value);
+            const sequenceAlias = alias && /(?:^|_)(?:id|seq|seqno|seqnum|sequence|number|lineno|notlin|invlin|ordlin)(?:_|$)/i.test(alias);
+            // Known quantity/date/measurement values remain measurements when
+            // offset or combined; they are not allocation counters merely because
+            // an integer occurs in the formula. Explicit sequence outputs override this.
+            if (!sequenceAlias && ((column && measurement(column)) || (alias && measurement(alias)))) {
+                continue;
+            }
+            if (!expression || (!hasNumberStep(expression)
+                && !(alias && aggregateResultSteppedLater(block, alias, syntax.content)))) {
+                continue;
+            }
+            issues.push(issueAt(file, source, syntax.contentOffset + block.startIndex + 1 + match.index!,
                 vscode.DiagnosticSeverity.Warning,
-                `${match[1].toUpperCase()}() may introduce race conditions when deriving sequence/max numbers; document concurrency risks and prevent them or catch resulting failures`,
+                `${match[1].toUpperCase()}() appears to allocate or write a number from existing rows; concurrent sessions may choose the same value. Prefer a database sequence or serialize allocation and handle duplicate-key failures`,
                 'sql-min-max-race-condition'));
+            // One actionable reminder per SQL block rather than one per aggregate.
+            break;
         }
     }
     return issues;
@@ -736,6 +884,15 @@ function checkDml(
 ): McmdIssue[] {
     const issues: McmdIssue[] = [];
     const isListOrGet = /^(?:list|get)\s/i.test(commandName.trim());
+    if (isListOrGet) {
+        for (const call of commandCalls(syntax.content)) {
+            const write = /^(create|change|remove)\s+record\b/i.exec(call.mask);
+            if (!write) { continue; }
+            const operation = write[1].toLowerCase() === 'create' ? 'insert' : write[1].toLowerCase() === 'change' ? 'update' : 'delete';
+            issues.push(issueAt(file, source, syntax.contentOffset + call.start, vscode.DiagnosticSeverity.Error,
+                `${write[0]} is not allowed in list/get commands`, `list-get-no-${operation}`));
+        }
+    }
     for (const block of blocks) {
         const mask = maskCommentsAndStrings(block.content);
         const dml = /\b(insert|update|delete)\b/gi;
@@ -865,26 +1022,8 @@ function extractCteNames(mask: string): Set<string> {
 }
 
 function adjacentCommentMatches(code: string, block: BracketBlock, pattern: RegExp, innerIndex?: number): boolean {
-    const before = code.slice(0, block.startIndex);
-    const adjacentBlockComment = /(\/\*[\s\S]*?\*\/)(?:\s*)$/.exec(before);
-    if (adjacentBlockComment && pattern.test(adjacentBlockComment[1])) {
-        return true;
-    }
-    const trailingLineComment = before.match(/--[^\r\n]*$/);
-    if (trailingLineComment && pattern.test(trailingLineComment[0])) {
-        return true;
-    }
-    const after = code.slice(block.endIndex + 1);
-    const afterComment = /^\s*(\/\*[\s\S]*?\*\/|--[^\r\n]*)/.exec(after);
-    if (afterComment && pattern.test(afterComment[1])) {
-        return true;
-    }
-    if (innerIndex !== undefined) {
-        const prefix = block.content.slice(0, innerIndex);
-        const innerComment = /(\/\*[\s\S]*?\*\/|--[^\r\n]*)(?:\s*)$/.exec(prefix);
-        return !!innerComment && pattern.test(innerComment[1]);
-    }
-    return false;
+    return adjacentComments(code, block.startIndex, block.endIndex + 1,
+        innerIndex === undefined ? undefined : block.startIndex + 1 + innerIndex).some(comment => pattern.test(comment));
 }
 
 function checkNonViewTables(
@@ -947,10 +1086,14 @@ function checkNonViewTables(
                     && other.name.endsWith('_view')
                     && owningSelect(other) === owner
                 );
-                if (sameSelectHasView || adjacentCommentMatches(syntax.content, block, /(?:\bview\b|_view\b)/i)) {
+                const poldat = reference.name === 'poldat';
+                const reason = adjacentCommentMatches(syntax.content, block,
+                    poldat ? /poldat_view|performance|database\s+lock|\bview\b/i : /(?:\bview\b|_view\b)/i, reference.index);
+                if (!poldat && (sameSelectHasView || reason)) {
                     continue;
                 }
                 issues.push(issueAt(file, source, absoluteIndex, vscode.DiagnosticSeverity.Warning, message, rule));
+                if (reason) { continue; }
                 issues.push(issueAt(
                     file,
                     source,
@@ -980,94 +1123,117 @@ function checkNonViewTables(
     return issues;
 }
 
+function unwrapExpression(value: string): string {
+    let result = value.trim();
+    while (result.startsWith('(') && matching(result, 0) === result.length - 1) {
+        result = result.slice(1, -1).trim();
+    }
+    return result;
+}
+
 function denominatorToken(mask: string, slashIndex: number): string {
     const start = skipWhitespace(mask, slashIndex + 1);
-    const functionMatch = /^(nullif|decode)\s*\(/i.exec(mask.slice(start));
+    if (mask[start] === '(') {
+        const close = matching(mask, start);
+        return close < 0 ? '' : unwrapExpression(mask.slice(start, close + 1));
+    }
+    const functionMatch = /^[a-z_$#][\w$#]*\s*\(/i.exec(mask.slice(start));
     if (functionMatch) {
-        const open = mask.indexOf('(', start);
-        const close = findClosingParen(mask, open);
-        return mask.slice(start, close === -1 ? mask.length : close + 1).trim();
+        const close = matching(mask, mask.indexOf('(', start));
+        return close < 0 ? '' : mask.slice(start, close + 1).trim();
     }
-    const numberMatch = /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:e[+-]?\d+)?/i.exec(mask.slice(start));
-    if (numberMatch) {
-        return numberMatch[0];
-    }
-    const parenthesizedNumberMatch = /^\(\s*[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:e[+-]?\d+)?\s*\)/i.exec(mask.slice(start));
-    if (parenthesizedNumberMatch) {
-        return parenthesizedNumberMatch[0];
-    }
-    const token = /^@?[a-z0-9_$#]+(?:\.[a-z0-9_$#]+)*/i.exec(mask.slice(start));
-    return token?.[0] || '';
+    return /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:e[+-]?\d+)?/i.exec(mask.slice(start))?.[0]
+        || /^@?[a-z0-9_$#]+(?:\.[a-z0-9_$#]+)*/i.exec(mask.slice(start))?.[0] || '';
+}
+
+function numericLiteral(value: string): number | undefined {
+    const text = unwrapExpression(value);
+    return /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text) ? Number(text) : undefined;
 }
 
 function isConstantDenominator(denominator: string): boolean {
-    if (!denominator) {
-        return false;
-    }
-    const numericLiteral = /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:e[+-]?\d+)?$/i;
-    const value = denominator.trim();
-    if (numericLiteral.test(value)) {
-        return Number(value) !== 0;
-    }
-    if (!/^\([^()]*\)$/.test(value)) {
-        return false;
-    }
-    const parenthesized = value.slice(1, -1).trim();
-    return numericLiteral.test(parenthesized) && Number(parenthesized) !== 0;
+    const number = numericLiteral(denominator);
+    return number !== undefined && Number.isFinite(number) && number !== 0;
 }
 
 function splitFunctionArguments(call: string): string[] {
-    const open = call.indexOf('(');
-    const close = call.lastIndexOf(')');
-    if (open === -1 || close <= open) {
-        return [];
-    }
-    const content = call.slice(open + 1, close);
-    const args: string[] = [];
-    let depth = 0;
-    let start = 0;
-    for (let index = 0; index < content.length; index++) {
-        if (content[index] === '(') {
-            depth++;
-        } else if (content[index] === ')') {
-            depth = Math.max(0, depth - 1);
-        } else if (content[index] === ',' && depth === 0) {
-            args.push(content.slice(start, index).trim());
-            start = index + 1;
-        }
-    }
-    args.push(content.slice(start).trim());
-    return args;
+    const open = call.indexOf('('), close = call.lastIndexOf(')');
+    return open < 0 || close <= open ? [] : splitSqlValues(call.slice(open + 1, close)).map(arg => arg.trim());
 }
 
 function isProtectedDenominator(denominator: string): boolean {
-    if (/^nullif\s*\(/i.test(denominator)) {
-        const args = splitFunctionArguments(denominator);
-        return args.length >= 2 && /^0(?:\.0+)?$/.test(args[1]);
+    const value = unwrapExpression(denominator);
+    const open = value.indexOf('(');
+    if (open < 0 || matching(value, open) !== value.length - 1) { return false; }
+    const args = splitFunctionArguments(value);
+    if (/^nullif\s*\(/i.test(value)) {
+        return args.length === 2 && numericLiteral(args[1]) === 0;
     }
-    if (/^decode\s*\(/i.test(denominator)) {
-        const args = splitFunctionArguments(denominator);
-        if (args.length < 4 || !/^0(?:\.0+)?$/.test(args[1])) {
-            return false;
+    if (!/^decode\s*\(/i.test(value) || args.length < 3) { return false; }
+    const hasDefault = args.length % 2 === 0;
+    const pairEnd = hasDefault ? args.length - 1 : args.length;
+    const searches = new Set<number>();
+    let handlesZero = false;
+    // This is an explicit zero-handling format rule, not a proof of business
+    // values. Reject literal-zero branches; do not assume other columns are zero.
+    const safe = (result: string): boolean => result.trim().length > 0 && numericLiteral(result) !== 0;
+    for (let i = 1; i + 1 < pairEnd; i += 2) {
+        const search = numericLiteral(args[i]);
+        if (search !== undefined && searches.has(search)) { continue; }
+        if (search !== undefined) { searches.add(search); }
+        if (search === 0) { handlesZero = true; }
+        if (!safe(args[i + 1])) { return false; }
+    }
+    return handlesZero && (!hasDefault || safe(args[args.length - 1]));
+}
+
+function provesNonzero(condition: string, denominator: string, truth: boolean): boolean {
+    const clean = unwrapExpression(condition);
+    const depths = parenDepths(clean);
+    for (const operator of ['or', 'and']) {
+        const parts: string[] = [];
+        let start = 0;
+        for (const m of clean.matchAll(new RegExp('\\b' + operator + '\\b', 'gi'))) {
+            if (depths[m.index!] === 0) { parts.push(clean.slice(start, m.index)); start = m.index! + m[0].length; }
         }
-        return args[2].length > 0 && !/^[+-]?0(?:\.0+)?$/.test(args[2]);
+        if (parts.length) {
+            parts.push(clean.slice(start));
+            const all = (operator === 'or') === truth;
+            return all ? parts.every(p => provesNonzero(p, denominator, truth))
+                : parts.some(p => provesNonzero(p, denominator, truth));
+        }
     }
-    return false;
+    const name = unwrapExpression(denominator).replace(/\s/g, '').toLowerCase();
+    const comparison = clean.replace(/\s/g, '').toLowerCase();
+    if (!name) { return false; }
+    return truth
+        ? [name + '<>0', name + '!=0', '0<>' + name, '0!=' + name].includes(comparison)
+        : [name + '=0', '0=' + name].includes(comparison);
 }
 
 function hasCaseZeroGuard(mask: string, slashIndex: number, denominator: string): boolean {
-    if (!denominator) {
-        return false;
+    const frames: { subject: string; start: number; conditions: string[]; branch: string; conditionStart: number }[] = [];
+    for (const m of mask.slice(0, slashIndex).matchAll(/\b(case|when|then|else|end)\b/gi)) {
+        const word = m[1].toLowerCase(), index = m.index!, after = index + m[0].length;
+        if (word === 'case') { frames.push({ subject: '', start: after, conditions: [], branch: '', conditionStart: after }); continue; }
+        const frame = frames[frames.length - 1];
+        if (!frame) { continue; }
+        if (word === 'end') { frames.pop(); }
+        else if (word === 'when') {
+            if (!frame.conditions.length) { frame.subject = mask.slice(frame.start, index).trim(); }
+            frame.conditionStart = after; frame.branch = 'condition';
+        } else if (word === 'then') {
+            const condition = mask.slice(frame.conditionStart, index).trim();
+            frame.conditions.push(frame.subject ? frame.subject + '=' + condition : condition);
+            frame.branch = 'then';
+        } else if (word === 'else') { frame.branch = 'else'; }
     }
-    const before = mask.slice(0, slashIndex);
-    const caseIndex = before.toLowerCase().lastIndexOf('case');
-    if (caseIndex === -1 || mask.toLowerCase().indexOf('end', slashIndex) === -1) {
-        return false;
-    }
-    const casePrefix = mask.slice(caseIndex, slashIndex);
-    const escaped = escapeRegExp(denominator);
-    return new RegExp(`\\bwhen\\s+(?:${escaped}\\s*=\\s*0|0\\s*=\\s*${escaped})\\b`, 'i').test(casePrefix)
-        && /\belse\b/i.test(casePrefix);
+    return frames.some(frame => {
+        const previous = frame.branch === 'then' ? frame.conditions.slice(0, -1)
+            : frame.branch === 'else' ? frame.conditions : [];
+        return previous.some(c => provesNonzero(c, denominator, false))
+            || (frame.branch === 'then' && provesNonzero(frame.conditions[frame.conditions.length - 1] || '', denominator, true));
+    });
 }
 
 function checkDivisions(blocks: BracketBlock[], file: string, source: string, syntaxOffset: number): McmdIssue[] {
@@ -1146,7 +1312,7 @@ function checkSelectComments(blocks: BracketBlock[], syntax: SyntaxContext, file
         if (!select) {
             continue;
         }
-        if (!adjacentCommentMatches(syntax.content, block, requiredComment)) {
+        if (!adjacentCommentMatches(syntax.content, block, requiredComment, select.index)) {
             const absoluteIndex = syntax.contentOffset + block.startIndex + 1 + select.index;
             issues.push(issueAt(
                 file,
@@ -1259,7 +1425,6 @@ function checkRawUsage(blocks: BracketBlock[], file: string, source: string, syn
         let match: RegExpExecArray | null;
         while ((match = pattern.exec(mask)) !== null) {
             const absoluteIndex = syntaxOffset + block.startIndex + 1 + match.index;
-            issues.push(issueAt(file, source, absoluteIndex, vscode.DiagnosticSeverity.Warning, ':raw requires confirmed SQL injection protection', 'raw-usage'));
             if (rawInSelectList(mask, match.index)) {
                 issues.push(issueAt(file, source, absoluteIndex, vscode.DiagnosticSeverity.Warning, ':raw in SELECT clause may expand into an illegal sub-select', 'raw-in-select'));
             }
@@ -1272,8 +1437,8 @@ function checkNobindBind(blocks: BracketBlock[], file: string, source: string, s
     const issues: McmdIssue[] = [];
     for (const block of blocks) {
         const content = block.content;
-        const markers = [...content.matchAll(/\*#(nobind|bind)\*\//gi)]
-            .map(match => ({ index: match.index ?? 0, kind: match[1].toLowerCase() }))
+        const markers = triviaSpans(content).filter(span => span.kind === 'comment' && /^\/\*\s*#(?:nobind|bind)\s*\*\/$/i.test(span.text))
+            .map(span => ({ index: span.start, kind: /#(nobind|bind)/i.exec(span.text)![1].toLowerCase() }))
             .sort((a, b) => a.index - b.index);
         const spans: Array<[number, number]> = [];
         let pendingNobind = -1;
@@ -1297,9 +1462,10 @@ function checkNobindBind(blocks: BracketBlock[], file: string, source: string, s
 
         const concatPattern = /\|\|/gi;
         let concat: RegExpExecArray | null;
-        while ((concat = concatPattern.exec(content)) !== null) {
+        const executable = maskCode(content);
+        while ((concat = concatPattern.exec(executable)) !== null) {
             const concatIndex = concat.index;
-            const region = content.slice(Math.max(0, concatIndex - 120), Math.min(content.length, concatIndex + 120));
+            const region = executable.slice(Math.max(0, concatIndex - 120), Math.min(content.length, concatIndex + 120));
             const hasBindVariable = /(?:^|[^'"])\s*@[a-z0-9_$#.]+/i.test(region);
             if (!hasBindVariable) {
                 continue;
@@ -1315,13 +1481,14 @@ function checkNobindBind(blocks: BracketBlock[], file: string, source: string, s
 function checkPrtdsc(blocks: BracketBlock[], file: string, source: string, syntaxOffset: number): McmdIssue[] {
     const issues: McmdIssue[] = [];
     for (const block of blocks) {
-        const content = block.content;
+        const content = maskCode(block.content);
         if (!/\bprtdsc\b/i.test(content) || !/\bcolval\b/i.test(content)) {
             continue;
         }
         const colvalIndex = /\bcolval\b/i.exec(content)?.index ?? 0;
-        const hasNobind = /\*#nobind\*\//i.test(content.slice(0, colvalIndex));
-        const hasBind = /\*#bind\*\//i.test(content.slice(colvalIndex));
+        const markerComments = triviaSpans(block.content).filter(span => span.kind === 'comment');
+        const hasNobind = markerComments.some(span => span.start < colvalIndex && /^\/\*\s*#nobind\s*\*\/$/i.test(span.text));
+        const hasBind = markerComments.some(span => span.start > colvalIndex && /^\/\*\s*#bind\s*\*\/$/i.test(span.text));
         if (!hasNobind || !hasBind) {
             issues.push(issueAt(file, source, syntaxOffset + block.startIndex + 1 + colvalIndex, vscode.DiagnosticSeverity.Error, 'prtdsc.colval concatenation must be wrapped in /*#nobind*/ ... /*#bind*/', 'prtdsc-nobind-bind'));
         }
@@ -1332,13 +1499,14 @@ function checkPrtdsc(blocks: BracketBlock[], file: string, source: string, synta
 function checkTimestampExpressions(blocks: BracketBlock[], file: string, source: string, syntaxOffset: number): McmdIssue[] {
     const issues: McmdIssue[] = [];
     for (const block of blocks) {
-        const content = block.content;
+        const content = maskCode(block.content);
         const match = /\bfrom_tz\s*\(/i.exec(content);
         if (!match || !/\b(?:cast\s*\(|to_char\s*\(|sessiontimezone\b|at\s+time\s+zone\b)/i.test(content)) {
             continue;
         }
-        const hasNobind = /\*#nobind\*\//i.test(content.slice(0, match.index));
-        const hasBind = /\*#bind\*\//i.test(content.slice(match.index));
+        const markers = triviaSpans(block.content).filter(span => span.kind === 'comment');
+        const hasNobind = markers.some(span => span.start < match.index && /^\/\*\s*#nobind\s*\*\/$/i.test(span.text));
+        const hasBind = markers.some(span => span.start > match.index && /^\/\*\s*#bind\s*\*\/$/i.test(span.text));
         if (!hasNobind || !hasBind) {
             issues.push(issueAt(file, source, syntaxOffset + block.startIndex + 1 + match.index, vscode.DiagnosticSeverity.Error, 'Complex timestamp expressions must be wrapped in /*#nobind*/ ... /*#bind*/', 'timestamp-nobind-bind'));
         }
@@ -1348,29 +1516,30 @@ function checkTimestampExpressions(blocks: BracketBlock[], file: string, source:
 
 function checkSessionVariable(syntax: SyntaxContext, file: string, source: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const executable = maskCommentsAndStrings(syntax.content, false);
-    const pattern = /\bget\s+session\s+variable\b/gi;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(executable)) !== null) {
-        const tail = executable.slice(match.index + match[0].length, match.index + match[0].length + 400);
-        if (!/(?:catch\s*\(|nvl\s*\(\s*@value\b|@\w+\s*=\s*nvl\s*\()/i.test(tail)) {
-            issues.push(issueAt(file, source, syntax.contentOffset + match.index, vscode.DiagnosticSeverity.Warning, 'Get Session Variable must catch errors or explicitly default @value', 'session-variable-uncaptured'));
+    for (const call of commandCalls(syntax.content)) {
+        if (!/^get\s+session\s+variable(?=\s+(?:where|catch)\b|\s*(?:>>|$))/i.test(call.mask)) { continue; }
+        const tail = maskCode(syntax.content.slice(call.end, call.end + 400));
+        if (!/catch\s*\(/i.test(call.mask) && !/(?:nvl\s*\(\s*@value\b|@\w+\s*=\s*nvl\s*\()/i.test(tail)) {
+            issues.push(issueAt(file, source, syntax.contentOffset + call.start, vscode.DiagnosticSeverity.Warning,
+                'Get Session Variable must catch errors or explicitly default @value', 'session-variable-uncaptured'));
         }
     }
     return issues;
 }
 
+function checkListExecuteCommands(commandName: string, syntax: SyntaxContext, file: string, source: string): McmdIssue[] {
+    if (!/^list(?:\s|$)/i.test(commandName.trim())) { return []; }
+    return commandCalls(syntax.content).filter(call => /^execute\b/i.test(call.mask)).map(call =>
+        issueAt(file, source, syntax.contentOffset + call.start, vscode.DiagnosticSeverity.Error,
+            'List commands must not invoke MOCA commands starting with execute', 'list-no-execute-command'));
+}
+
 function checkExecuteServerCommand(syntax: SyntaxContext, file: string, source: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const pattern = /\bexecute\s+server\s+command\b/gi;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(syntax.content)) !== null) {
-        const tail = syntax.content.slice(match.index, match.index + 400);
-        const statementEnd = tail.search(/\n\s*(?:\||\}|;)/);
-        const statement = statementEnd === -1 ? tail : tail.slice(0, statementEnd);
-        const quoteCount = (statement.match(/'/g) || []).length;
-        if (quoteCount % 2 === 1) {
-            issues.push(issueAt(file, source, syntax.contentOffset + match.index, vscode.DiagnosticSeverity.Warning, 'Execute Server Command must handle single quotes in parameter values correctly', 'execute-server-command-quotes'));
+    for (const call of commandCalls(syntax.content)) {
+        if (/^execute\s+server\s+command\b/i.test(call.mask) && (call.text.match(/'/g) || []).length % 2 === 1) {
+            issues.push(issueAt(file, source, syntax.contentOffset + call.start, vscode.DiagnosticSeverity.Warning,
+                'Execute Server Command must handle single quotes in parameter values correctly', 'execute-server-command-quotes'));
         }
     }
     return issues;
@@ -1378,14 +1547,13 @@ function checkExecuteServerCommand(syntax: SyntaxContext, file: string, source: 
 
 function checkSendEmail(syntax: SyntaxContext, file: string, source: string): McmdIssue[] {
     const issues: McmdIssue[] = [];
-    const pattern = /\bsend\s+email\b/gi;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(syntax.content)) !== null) {
-        const tail = syntax.content.slice(match.index, match.index + 500);
-        const statementEnd = tail.search(/\n\s*(?:\||\}|;)/);
-        const statement = statementEnd === -1 ? tail : tail.slice(0, statementEnd);
-        if (/(?:mail_from|send_from|mail_server|smtp_server)\s*=\s*(?:(?:nvl\s*\(\s*@[^,]+,\s*'[^']+'|'[^']+'))/i.test(statement)) {
-            issues.push(issueAt(file, source, syntax.contentOffset + match.index, vscode.DiagnosticSeverity.Error, 'Send Email must not hardcode default sender/server configuration; keep defaults in policy', 'send-email-hardcoded-config'));
+    for (const call of commandCalls(syntax.content)) {
+        if (!/^send\s+email\b/i.test(call.mask)) { continue; }
+        const hardcoded = [...call.mask.matchAll(/\b(?:mail_from|send_from|mail_server|smtp_server)\s*=/gi)].some(param =>
+            /^(?:mail_from|send_from|mail_server|smtp_server)\s*=\s*(?:nvl\s*\(\s*@[^,]+,\s*'[^']+'|'[^']+')/i.test(call.text.slice(param.index)));
+        if (hardcoded) {
+            issues.push(issueAt(file, source, syntax.contentOffset + call.start, vscode.DiagnosticSeverity.Error,
+                'Send Email must not hardcode default sender/server configuration; keep defaults in policy', 'send-email-hardcoded-config'));
         }
     }
     return issues;
@@ -1410,11 +1578,12 @@ export function performMcmdReview(document: ReviewDocument): McmdIssue[] {
     issues.push(...checkGroovy(syntax, file, text));
     issues.push(...checkCopyMarkers(syntax, file, text));
     issues.push(...checkPluginReferences(name, syntax, file, text));
+    issues.push(...checkListExecuteCommands(name, syntax, file, text));
     const blocks = extractBracketBlocks(syntax.content);
     issues.push(...checkComplexSql(blocks, name, file, text, syntax.contentOffset));
     issues.push(...checkSelectComments(blocks, syntax, file, text));
     issues.push(...checkDml(blocks, name, file, text, syntax));
-    issues.push(...checkSqlConcurrency(blocks, file, text, syntax.contentOffset));
+    issues.push(...checkSqlConcurrency(blocks, file, text, syntax));
     issues.push(...checkInSubqueries(blocks, file, text, syntax.contentOffset));
     issues.push(...checkSelectClauseSubqueries(blocks, file, text, syntax.contentOffset));
     issues.push(...checkNonViewTables(blocks, file, text, syntax));
@@ -1423,6 +1592,10 @@ export function performMcmdReview(document: ReviewDocument): McmdIssue[] {
     issues.push(...checkValidateKeyExistence(blocks, file, text, syntax.contentOffset));
     issues.push(...checkDistinctRownum(blocks, file, text, syntax.contentOffset));
     issues.push(...checkRawUsage(blocks, file, text, syntax.contentOffset));
+    for (const match of maskCode(syntax.content).matchAll(/:raw\b/gi)) {
+        issues.push(issueAt(file, text, syntax.contentOffset + match.index!, vscode.DiagnosticSeverity.Warning,
+            ':raw requires confirmed SQL injection protection', 'raw-usage'));
+    }
     issues.push(...checkNobindBind(blocks, file, text, syntax.contentOffset));
     issues.push(...checkPrtdsc(blocks, file, text, syntax.contentOffset));
     issues.push(...checkTimestampExpressions(blocks, file, text, syntax.contentOffset));
@@ -1445,7 +1618,7 @@ export function performTriggerReview(document: ReviewDocument): McmdIssue[] {
     const withoutTrailingTerminator = executable.replace(/;\s*$/, '').trim();
     const hasForbiddenControl = /\bpublish\s+data\b|\bif\s*\(|\belse\b|[{}|]/i.test(withoutTrailingTerminator);
     const hasMultipleSemicolons = /;/.test(withoutTrailingTerminator);
-    if (!withoutTrailingTerminator || hasForbiddenControl || hasMultipleSemicolons) {
+    if (!withoutTrailingTerminator || hasForbiddenControl || hasMultipleSemicolons || commandCalls(syntax.content).length !== 1) {
         issues.push(issueAt(
             file,
             text,
@@ -1473,34 +1646,20 @@ export function validateGitBranchName(branchName: string): McmdIssue[] {
 }
 
 export function checkJrxmlMocaConnection(document: ReviewDocument): McmdIssue[] {
-    const text = document.getText();
-    const issues: McmdIssue[] = [];
-    const tagPattern = /<parameter\b[^>]*\bname\s*=\s*"MOCA_REPORT_CONNECTION"[^>]*>/gi;
-    let match: RegExpExecArray | null;
-    while ((match = tagPattern.exec(text)) !== null) {
-        if (/\/\s*>$/.test(match[0])) {
-            continue;
-        }
-        const bodyStart = match.index + match[0].length;
-        const closeMatch = /<\/parameter\s*>/i.exec(text.slice(bodyStart));
-        const body = text.slice(bodyStart, closeMatch ? bodyStart + closeMatch.index : text.length);
-        const bodyWithoutComments = body.replace(/<!--[\s\S]*?-->/g, '').trim();
-        const propertyMatch = /^<property\b([^>]*)\/\s*>$/i.exec(bodyWithoutComments);
-        const propertyAttributes = propertyMatch?.[1] || '';
-        const propertyOnly = !!propertyMatch
-            && /\bname\s*=\s*["']MOCA["']/i.test(propertyAttributes)
-            && /\bvalue\s*=\s*["']true["']/i.test(propertyAttributes);
-        const hasDefaultElement = /<defaultValueExpression\b/i.test(body);
-        const localLink = /localhost|\b(?:\d{1,3}\.){3}\d{1,3}\b|\bjdbc:|\bhttps?:\/\/|\bmoca:\/\/|\b(?:server|host|url)\s*[:=]\s*["']?[a-z0-9.:/_-]+/i.test(body);
-        if (!propertyOnly || hasDefaultElement || localLink) {
-            issues.push(issueAt(
-                document.fileName,
-                text,
-                match.index,
-                vscode.DiagnosticSeverity.Error,
+    const text = document.getText(), issues: McmdIssue[] = [];
+    for (const parameter of xmlElements(text, 'parameter')) {
+        if (xmlAttribute(parameter.open, 'name') !== 'MOCA_REPORT_CONNECTION' || parameter.selfClosing) { continue; }
+        const body = maskXmlComments(parameter.body).trim();
+        const properties = xmlElements(body, 'property');
+        const property = properties[0];
+        const propertyOnly = properties.length === 1 && property.selfClosing
+            && body === property.open
+            && xmlAttribute(property.open, 'name') === 'MOCA'
+            && xmlAttribute(property.open, 'value') === 'true';
+        if (!propertyOnly) {
+            issues.push(issueAt(document.fileName, text, parameter.start, vscode.DiagnosticSeverity.Error,
                 'MOCA_REPORT_CONNECTION must be self-closing or contain only the MOCA property without a local/hardcoded connection',
-                'jrxml-moca-connection-invalid'
-            ));
+                'jrxml-moca-connection-invalid'));
         }
     }
     return issues;

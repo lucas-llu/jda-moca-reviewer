@@ -2,7 +2,7 @@
   "name": "code-reviewer",
   "displayName": "JDA MOCA Code Reviewer",
   "description": "Review JDA/Blue Yonder MOCA commands, triggers, database, CSV/CTL, and report/label artifacts in VS Code",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "repository": {
     "type": "git",
     "url": "https://github.com/lucas-llu/jda-moca-reviewer.git"
@@ -60,7 +60,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "test": "npm run compile && node --require ./test/vscode-mock.cjs --test test/extension.test.cjs test/improvements.test.cjs test/unimplemented.test.cjs test/modules.test.cjs"
+    "test": "npm run compile && node --require ./test/vscode-mock.cjs --test test/extension.test.cjs test/improvements.test.cjs test/unimplemented.test.cjs test/modules.test.cjs test/audit-regressions.test.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

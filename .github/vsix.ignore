@@ -3,6 +3,7 @@
 !README.md
 !LICENSE
 !out/extension.js
+!out/analysis.js
 !out/reviewer.js
 !out/rules/csv.js
 !out/rules/database.js

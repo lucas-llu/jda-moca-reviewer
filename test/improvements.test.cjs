@@ -6,13 +6,120 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const rules = require('../out/extension.js').__test;
+describe('list commands cannot invoke execute commands', () => {
+    const executeIssues = (syntax, name = 'list lc records') =>
+        rules.performMcmdReview(documentOf(fileFor(name), mcmd(name, syntax)))
+            .filter(issue => issue.rule === 'list-no-execute-command');
+
+    test('rejects all execute command variants and overrides at command boundaries', () => {
+        for (const syntax of [
+            'execute server command where cmd = \'list lc data\'',
+            'execute os command where command = \'echo test\'',
+            'execute lc custom operation',
+            'publish data where x=1 | execute sql',
+            'publish data where x=1; execute server command',
+            '{ execute lc custom operation }',
+            '^execute server command',
+            '/* required */ EXECUTE\nserver command'
+        ]) {
+            const issues = executeIssues(syntax);
+            assert.equal(issues.length, 1, syntax);
+            assert.equal(issues[0].severity, 0);
+            const sourceLine = mcmd('list lc records', syntax).split('\n')[issues[0].line - 1];
+            assert.match(sourceLine.slice(issues[0].column - 1), /^execute\b/i);
+        }
+    });
+
+    test('checks nested and unbraced conditions and catch handlers', () => {
+        for (const syntax of [
+            'if (@x=1) { execute server command } else { execute os command }',
+            'if (nvl(@x,0)=1) execute server command else execute os command',
+            'list lc other catch(-1403) { execute server command }; execute os command'
+        ]) {
+            assert.equal(executeIssues(syntax).length, 2, syntax);
+        }
+    });
+
+    test('ignores comments, literals, SQL, parameter names and non-leading execute words', () => {
+        for (const syntax of [
+            '/* execute server command */ publish data where x=1 -- execute os command',
+            'publish data where command=\'execute server command\' and execute=@execute',
+            'publish data where text="execute os command"',
+            '[select execute, \'execute server command\' as text from sample_view]',
+            'list lc execute records | execute_lc_operation',
+            'publish data where value=@execute || @other',
+            'if (@execute=1) list lc execute records'
+        ]) {
+            assert.deepEqual(executeIssues(syntax), [], syntax);
+        }
+    });
+
+    test('does not restrict get or process command prefixes', () => {
+        for (const name of ['get lc records', 'process lc records', 'listings lc records']) {
+            assert.deepEqual(executeIssues('execute server command', name), []);
+        }
+    });
+});
 describe('SQL concurrency and UPDATE safety', () => {
     const review = syntax => rules.performMcmdReview(documentOf(fileFor('process lc safety'), mcmd('process lc safety', syntax)));
-    test('warns for each MIN/MAX even with comments and catch', () => {
-        const result = review('/* race condition handled */ [select MAX(id), min(id) from sample_view] catch(@?)');
-        assert.equal(result.filter(x => x.rule === 'sql-min-max-race-condition').length, 2);
-        assert.ok(result.filter(x => x.rule === 'sql-min-max-race-condition').every(x => x.severity === 1));
-        assert.ok(!ids(review("[select 'max(id)' from sample_view /* min(id) */]")).includes('sql-min-max-race-condition'));
+    test('does not warn on statistics, pivots, latest-row lookups or unrelated writes', () => {
+        for (const syntax of [
+            '[select max(qty), min(price) from sample_view]',
+            '[select max(id), min(sequence) from sample_view]',
+            '[select max(price) - min(price) spread from sample_view]',
+            "[select max(decode(polval, 'FIELD', rtstr2, null)) field from poldat]",
+            '[select max(id) over (partition by group_id) latest from sample_view]',
+            '[select id from sample_view where id = (select max(id) from sample_view)]',
+            '[select max(id) latest_id from sample_view] | [update sample set qty=1 where id=@latest_id]',
+            '[update sample set qty=1 where id=(select max(id) from sample)]',
+            '[select max(qty) total from sample_view] | create record where table=\'stats\' and qty=@total',
+            '[select max(id) last_id from sample] | create record where table=\'sample\' and id=@last_id',
+            '[insert into sample(id) select max(id) from sample]',
+            '[select max(x) value from sample] | publish data where value=99 | publish data where next_value=@value+1',
+            '[select max(x) value from sample] | [select 99 as value from dual] | publish data where next_value=@value+1',
+            '[select max(x) value from sample] | [select name from sample where id=@value+1]',
+            '[select max(x)+0 value from sample]',
+            "[select case when instr(max(note), ',')>0 then max(substr(note,instr(note,',')+1)) else max(note) end item from notes]",
+            '[select max(to_number(substr(stoloc,length(@base)+1,99))) current_value from sample]',
+            '[select max(x) value from sample] | [select substr(@value, @offset+1) text_value from dual]',
+            '[select max(x) value from sample] | publish data where copy=nvl(@value, @other+1)',
+            '[select max(pckqty) old_pckqty from sample] | create record where pckqty=@old_pckqty-@sum_appqty',
+            '[select max(untcas) untcas from sample] | publish data where quantity=@untcas+1',
+            '[select max(early_shpdte)+8/24 plan_due_dte from sample]',
+            '[select max(ctnwgt) ctnwgt from sample] | create record where weight=@weight+@ctnwgt',
+            '[select max(id) latest_id from sample_view] | create record where table=\'sample\' and id=@different_id',
+            "[select 'max(id)+1' from sample_view /* min(id)-1 */]"
+        ]) {
+            assert.ok(!ids(review(syntax)).includes('sql-min-max-race-condition'), syntax);
+        }
+    });
+    test('warns once per SQL block for suspicious number allocation', () => {
+        for (const syntax of [
+            '[select MAX(id)+1 next_id, min(id)-1 low_id from sample]',
+            '[select nvl(max(seqnum), 0) + 1 as next_seq from sample]',
+            '[select min(t.sequence)-@step new_number from sample t]',
+            '[insert into sample (id) select max(id)+1 from sample]',
+            '[select max(arbitrary_column)+1 value from sample]',
+            '[select max(sheet_number+1) nxt_sheet from sample]',
+            '[select max(to_number(sheet_number)+1) nxt_sheet from sample]',
+            '[select 1+max(arbitrary_column) value from sample]',
+            '[select max(to_number(substr(stoloc,length(@base)+1,99)))+1 next_value from sample]',
+            '[select max(x) value from sample] | publish data where copy=nvl(@value,0)+1',
+            '[select max(x) value from sample] | publish data where next_value=@value+1',
+            '[select max(x) value from sample] | publish data where temporary=@value | publish data where next_value=@temporary+1',
+            '[select max(x) value from sample] | [select @value+1 next_value from dual]',
+            '[select max(x) value from sample] | create record where table=\'sample\' and seq=@value+1',
+            '[select max(x) value from sample] | [update sample set seq=@value+1 where id=@id] catch(@?)',
+            '[select max(id) as last_id from sample] | [insert into sample(id) values(@last_id+1)]',
+            '/* race condition handled */ [select max(id)+1 next_id from sample] catch(@?)'
+        ]) {
+            const warnings = review(syntax).filter(x => x.rule === 'sql-min-max-race-condition');
+            assert.equal(warnings.length, 1, syntax);
+            assert.equal(warnings[0].severity, 1);
+        }
+        const warnings = review('[select max(id)+1 next_id from sample] | [select min(id)-1 next_id from other]')
+            .filter(x => x.rule === 'sql-min-max-race-condition');
+        assert.equal(warnings.length, 2);
     });
     test('requires catch for UPDATE and always reminds about audit fields', () => {
         const sql = '[update sample set last_update_usr = @usr_id, last_update_time = sysdate]';
@@ -37,6 +144,63 @@ describe('SQL concurrency and UPDATE safety', () => {
 const devin02Root = process.env.DEVIN02_ROOT || 'D:\\workspace\\devin02';
 const devin02Lcint = path.join(devin02Root, 'les', 'src', 'cmdsrc', 'lcint');
 const amazonPackListCommand = 'D:\\workspace\\swift-pd-customisations-amazon-messaging\\les\\src\\cmdsrc\\pdhs\\process_pd_amzmsg_ish_print_pack_list.mcmd';
+const groupFieldsCommand = path.join(devin02Lcint, 'list_lc_open_carton_inspection_data_for_grp_fields.mcmd');
+
+test('real string field pivot does not produce MIN/MAX race warnings', {
+    skip: !fs.existsSync(groupFieldsCommand)
+}, () => {
+    const text = fs.readFileSync(groupFieldsCommand, 'utf8');
+    assert.ok(/max\s*\(\s*decode/i.test(text));
+    const issues = rules.performMcmdReview(documentOf(groupFieldsCommand, text));
+    assert.ok(!ids(issues).includes('sql-min-max-race-condition'));
+});
+
+test('all seven devin02 MAX files remain free of sequence-allocation warnings', {
+    skip: !fs.existsSync(devin02Lcint)
+}, () => {
+    for (const name of [
+        'list_lc_open_carton_inspection_data_for_grp_fields',
+        'list_lc_open_carton_inspection_data_for_map_fields',
+        'list_lc_open_carton_inspection_data_for_static_fields',
+        'list_lc_order_status_packed', 'list_lc_packing_sscc_curcas',
+        'list_lc_packing_sscc_label', 'list_lc_packing_sscc_label_fields'
+    ]) {
+        const fileName = path.join(devin02Lcint, `${name}.mcmd`);
+        const text = fs.readFileSync(fileName, 'utf8');
+        assert.ok(/max\s*\(/i.test(text), name);
+        assert.ok(!ids(rules.performMcmdReview(documentOf(fileName, text))).includes('sql-min-max-race-condition'), name);
+    }
+});
+
+describe('workspace MAX regression samples', () => {
+    const root = process.env.MOCA_WORKSPACE_ROOT || 'D:\\workspace';
+    const cases = [
+        ['au02i/les/src/cmdsrc/lcint/list_lc_au02_packing_slip_data.mcmd', false],
+        ['au02i/les/src/cmdsrc/lcint/list_lc_au02_invoice_report_data.mcmd', false],
+        ['au02i/les/src/cmdsrc/lcint/create_inventory_serial_number.mcmd', false],
+        ['de03/les/src/cmdsrc/lcint/process_remaining_picks_for_list.mcmd', false],
+        ['swift-isc-customisations-cn01/les/src/cmdsrc/lcint/list_lc_metso_picking_report_details.mcmd', false],
+        ['swift-isc-customisations-sg01/les/src/cmdsrc/lcint/list_lc_pack_list_weight_and_volume.mcmd', false],
+        ['swift-isc-customisations-jp01/les/src/cmdsrc/lcint/process_lc_manifest_event_for_carton.mcmd', false],
+        ['au02i/les/src/cmdsrc/lcint/update_lc_order_note_with_staging_location_for_api_call.mcmd', true],
+        ['swift-isc-customisations-au04/les/src/cmdsrc/lcint/get_lc_package_link_next_sequence.mcmd', true],
+        ['swift-isc-customisations-it04/les/src/cmdsrc/lcint/list_lc_kisoft_update_wcs_pick_group.mcmd', true],
+        ['swift-pd-customisations-amazon-messaging/les/src/cmdsrc/pdhs/process_pd_amzmsg_host_receipt_serial_number.mcmd', true],
+        ['swift-pd-customisations-warehouseautomation/les/src/cmdsrc/mcon/create_mcon_message_log_hist_entry.mcmd', true]
+    ];
+    for (const [relative, expected] of cases) {
+        const fileName = path.join(root, relative);
+        test(`${expected ? 'warns on allocation' : 'does not flag non-sequence use'}: ${relative}`, {
+            skip: !fs.existsSync(fileName)
+        }, () => {
+            const text = fs.readFileSync(fileName, 'utf8');
+            const warnings = rules.performMcmdReview(documentOf(fileName, text))
+                .filter(issue => issue.rule === 'sql-min-max-race-condition');
+            assert.equal(warnings.length > 0, expected);
+            assert.ok(warnings.every(issue => issue.severity === 1));
+        });
+    }
+});
 
 function documentOf(fileName, text) {
     return { fileName, getText: () => text };

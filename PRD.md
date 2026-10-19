@@ -30,6 +30,7 @@
 - 插件只实现能够根据当前文件内容、文件路径或工作区内明确依赖关系确定结果的规则。
 - 依赖人工判断或外部证据的项目不由插件检测，包括 QA/技术授权、SQL 性能结论、`DBMS_XPLAN` 结果、代表性数据测试、DBA/IT Operations 批准等。
 - 规则要求存在说明注释时，插件只检查注释格式是否存在，不评价注释内容质量。注释必须与对应 SQL block 紧邻，中间不得出现其他可执行语句；空泛或复制得到的注释（例如 `/* required */`）也视为满足格式要求。
+- 紧邻说明允许块注释、`--` 行注释及 SQL block 内第一个语句前的注释；连续注释可组成说明组。不得跨越可执行语句借用旧注释，注释和字符串中的伪造命令、catch 或绑定标记不作为执行证据。
 - 所有 `[select ...]` 都必须有紧邻注释，注释应包含 `/* No existing MOCA list command, use select statement instead. */`，说明为什么不用 MOCA list command。该注释不能替代非 View 说明：同一个 SELECT 没有使用任何 `_view`、而是直接访问物理表时，紧邻注释还必须明确提到 `view`/`_view` 并说明不使用 View 的原因；两项说明可以写在同一个注释块中。同一 SELECT 已使用 `_view` 表时，其他非 View 表不再报 Warning/Error。缺少所需说明时报告 Warning 并额外报告 `[Error]`。
 
 问题级别：
@@ -132,7 +133,12 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
 - 以下 SQL 规则只分析 MOCA `[...]` 内的实际 SQL；注释和字符串字面量中的关键字、运算符不参与判断。
 - [Warning] 使用 `INSERT`、`UPDATE` 或 `DELETE` 时始终报告 Warning。DML 目标是物理表，不执行 `_view` 检查。SQL 必须有紧邻注释并明确提到对应的现有 command，说明为什么不能使用它：INSERT 对应 `create record`，UPDATE 对应 `change record`，DELETE 对应 `remove record`；例如 mass update、更新主键或先查询 key 会造成性能问题。只有普通注释、但没有提到对应 command 时仍视为缺少说明，并额外报告 `[Error]`。
 - [Error] `list`/`get` command 不允许包含任何新增、修改或删除数据库数据的逻辑，包括 `INSERT`、`UPDATE`、`DELETE`。（AC-14）
-- [Warning] SQL 每处 `MAX()` / `MIN()` 调用均提示并发竞态风险，尤其是生成序号或取最大编号时；开发者需注释说明并防止竞态，必要时捕获失败。已有注释或 catch 不消除此 Warning。注释、字符串中的关键字不检测。
+- 上述职责限制同样适用于直接调用 `create record`、`change record`、`remove record`；不据此对普通 process 中的 change record 新增 catch 要求。
+- [Error] 第一个单词为 `list` 的 command，其 Local Syntax 中禁止直接调用第一个单词为 `execute` 的 MOCA command（如 `execute server command`、`execute os command`，以及其他 `execute ...`）。检查管道、分号、嵌套代码块及无花括号的 if/else/catch 分支，`^execute ...` override 调用同样禁止；按关键字不区分大小写。注释、字符串字面量、SQL/Groovy 块、参数名及命令名称中非首词的 execute 不触发此规则。只检查当前 command 的直接调用，不递归分析被调用 command；本条不扩展至 `get` 或其他前缀。
+- [Warning] `MAX()` / `MIN()` 仅在结果疑似用于生成新序号时提示，同一 SQL 块最多一次。直接 `MAX(xxx)+1`、`NVL(MAX(xxx),0)+1`、`MIN(xxx)-1`、正整数或变量步长，以及取出极值后在后续赋值中递增/递减均提示；字段名不必包含 id/seq。跟踪同一 command 内 SELECT 的未加引号别名、后续 `publish data` 复制/改名及 SQL SELECT 复制/改名，再检查后续计算、create/change/add/update command 参数或 SQL INSERT/UPDATE 赋值。覆盖赋值为不依赖原极值的新值后停止跟踪该变量。
+  - 同样识别 `MAX(column+1)`、`MAX(TO_NUMBER(column)+1)`。只检查作用于聚合结果或其派生变量的加减，不将聚合参数内部的 SUBSTR/INSTR/LENGTH 位置运算、其他 CASE 分支或 NVL 默认值中的 `+1` 当作序号生成。
+  - 普通 MAX/MIN 统计、`MAX(DECODE(...))` 字符串字段提取、只读极值/最新状态查询、WHERE 条件中的查找，以及直接复制原始极值（未加减生成新值）的写入不触发此序号分配 Warning。`+0` 不视为生成新序号。注释、字符串中的关键字和运算符不检测。数量、重量、价格、日期等明显度量字段按常见列名/结果别名后缀识别并排除（如 qty、wgt、dte、time、untcas），但显式 id/seq 等序号结果别名优先；该分类不是数据库列类型验证。
+  - 该规则为局部静态启发式检查，不读取数据库验证实际列类型，不能证明数据库一定存在或不存在竞态；不自动跟踪跨 command、动态 SQL、带引号别名或任意控制流/结果集操作。命中后开发者需确认序号分配用途，优先使用数据库 sequence 或串行化分配并处理重复键失败。普通注释或通用 catch 不自动屏蔽提示。
 - [Error] 直接 SQL `UPDATE` 必须有对应 SQL 块或包围它的 MOCA 代码块的非空 `catch(...)`；其他语句的 catch、注释或错误码本身不能替代。`SELECT ... FOR UPDATE` 不属于此处的数据更新。除修改主键外优先使用 `change record`；`change record` 的异常处理已完善，不新增 catch 检查或异常处理报错。
 - [Warning] 每次直接 SQL `UPDATE` 均提醒同步赋值审计字段，如 `last_update_usr`、`last_update_time`；即使已赋值也保留提示，字段及赋值正确性由开发者确认。
 - [Error] 禁止 `IN (SELECT ...)` 形式的子查询，必须改用 `EXISTS`。
@@ -168,6 +174,7 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
 - [Error] 对表字段进行新增、修改或删除时，必须同步修改原始 table creation script。
 - [Error] 表结构及数据布局变更必须是幂等的；如果增加 alter script，还必须同步更新 create script，并正确处理“变更已存在”和“主键发生变化”等场景。（AC-13）
 - [Error] 每个 Local Customisation 新建表都必须在 `usr_lc_orca_tables` 中登记，并通过 Local Customisation 的 CSV 文件交付该记录。（AC-22）
+- ORCA 登记查找包含合法的 bootstraponly、safetoload 与 orcaload 布局；index unload 必须包含针对完整对象名的实际卸载操作，不能仅凭注释提到对象名认定依赖存在。对象检查兼容 CREATE_TABLE 宏及原生 CREATE TABLE；sequence 的 catch 必须附属于创建语句或其包围块。
 - 数据库对象 tablespace 是否获得 IT Operations/DBA 批准属于人工审查，本阶段插件不检测。（AC-31）
 
 ## 4. CSV 和 CTL 文件相关
@@ -176,6 +183,7 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
 
 - [Error] `cust_lvl`：LC 仓库必须为 100 或更高；PD 插件仓库不检查该下限。
 - [Error] CSV 文件中不允许包含 SQL。
+- SQL 检测按 CSV 逻辑字段判断，允许带引号的多行字段，但不得将不同行/字段里的普通关键字拼成一段 SQL。Config Action 版本号按 major/minor/patch 逐段比较，不采用数值加权相加。
 - [Error] `les_mls_cat` 文件中：
   - LC 仓库：error 类型记录的编号必须在 `err4000000` 至 `err4999999` 范围内；非 error 类型记录必须以 `lc` 开头。
   - PD 插件仓库：error 类型记录的编号必须位于该插件登记的 error 区间内（未登记时按 `3000000-3999999` 校验），非 error 类型记录必须以 `pd_` 开头；error 行的 `grp_nam` 必须与插件登记的 group 一致。
@@ -279,6 +287,7 @@ PD 插件仓库等效写法：
 - 插件通过 Git log 搜索当前分支中包含该 Ticket 号的 commit。
 - Ticket 匹配采用模糊/子串匹配，`SWIFTLEX-12` 匹配到 `SWIFTLEX-123` 是允许的。
 - 历史范围包含该分支上与 Ticket 相关的全部提交，包括 merge commit。
+- merge 以第一父提交的差异表示本次合并引入当前分支的变化；仍遍历完整历史，不以 first-parent 限制提交搜索。Git 路径按 NUL 分隔解析，保留 Unicode、空格和真实文件名字符，rename/copy 取目标路径。
 - rename/delete 之后只检查仍然存在的新文件，不再审查已删除的旧路径。
 - 二进制文件不检查。
 - 筛选结果包含 staged、unstaged 和 untracked 变更。
