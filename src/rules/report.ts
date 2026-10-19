@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { maskXmlComments, xmlElements, xmlAttribute } from '../analysis';
 
 export interface ReviewDocument {
     fileName: string;
@@ -67,10 +68,18 @@ export function performJrxmlReview(document: ReviewDocument): McmdIssue[] {
     if ([...baseName].length > 30) {
         issues.push(issueAt(file, text, 0, vscode.DiagnosticSeverity.Error, `Report file name '${baseName}' exceeds 30 characters`, 'report-filename-too-long'));
     }
-    const rptIdMatch = /\bname\s*=\s*"rpt_id"[\s\S]{0,160}?value\s*=\s*"([^"]+)"/i.exec(text)
-        || /\brpt_id\b\s*[=:]\s*["']?([a-z0-9_-]+)/i.exec(text);
-    if (rptIdMatch && !/^\^[^^]*\^$/.test(rptIdMatch[1]) && rptIdMatch[1] !== baseName) {
-        issues.push(issueAt(file, text, rptIdMatch.index, vscode.DiagnosticSeverity.Error, `rpt_id '${rptIdMatch[1]}' does not match report file name '${baseName}'`, 'rpt-id-mismatch'));
+    const parameter = xmlElements(text, 'parameter').find(p => xmlAttribute(p.open, 'name') === 'rpt_id');
+    let value = parameter && xmlAttribute(parameter.open, 'value');
+    if (parameter && value === undefined) {
+        const literal = xmlElements(parameter.body, 'defaultValueExpression')[0]?.body
+            .replace(/^\s*<!\[CDATA\[|\]\]>\s*$/g, '').trim();
+        if (literal && /^"[^"\r\n]*"$/.test(literal)) { value = literal.slice(1, -1); }
+    }
+    const flat = /<[a-z]/i.test(maskXmlComments(text)) ? undefined
+        : /\brpt_id\b\s*[=:]\s*["']?([a-z0-9_-]+)/i.exec(maskXmlComments(text));
+    value = value ?? flat?.[1];
+    if (value !== undefined && !/^\^[^^]*\^$/.test(value) && value !== baseName) {
+        issues.push(issueAt(file, text, parameter?.start ?? flat?.index ?? 0, vscode.DiagnosticSeverity.Error, `rpt_id '${value}' does not match report file name '${baseName}'`, 'rpt-id-mismatch'));
     }
     return issues;
 }

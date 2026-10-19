@@ -1,0 +1,275 @@
+[
+  {
+    "id": "C01-comment-execute",
+    "rule": "execute-server-command-quotes",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[/* execute server command where cmd = '@value */ publish data where x=1]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C02-comment-email",
+    "rule": "send-email-hardcoded-config",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[/* send email where mail_from = 'sample@example.invalid' */ publish data where x=1]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C03-string-session",
+    "rule": "session-variable-uncaptured",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[publish data where text=\"get session variable\"]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C04-comment-prtdsc",
+    "rule": "prtdsc-nobind-bind",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[[select id from sample_view /* prtdsc.colval */]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C05-string-bind-marker",
+    "rule": "nobind-bind-unbalanced",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[[select '/*#nobind*/' note from sample_view]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C06-string-concat",
+    "rule": "nobind-bind-required",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[[select 'a || @x' note from sample_view]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C07-old-select-comment",
+    "rule": "select-missing-comment",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[/* No existing MOCA list command, use select statement instead. */ publish data where x=1 | /* unrelated */ [select id from sample_view]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C08-old-view-comment",
+    "rule": "select-from-non-view-missing-comment",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[/* No view exists. */ publish data where x=1 | /* No existing MOCA list command, use select statement instead. */ [select id from physical_table]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C09-inner-select-comment",
+    "rule": "select-missing-comment",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[[/* No existing MOCA list command, use select statement instead. */ select id from sample_view]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C10-xml-comment",
+    "rule": "invalid-command-root",
+    "expected": false,
+    "source": "<!-- release note --><command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[publish data where x=1]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "D01-comment-sequence-catch",
+    "rule": "database-sequence-not-idempotent",
+    "expected": true,
+    "source": "/* catch(-955) */ [CREATE SEQUENCE usr_lc_seq START WITH 1]",
+    "file": "les/db/ddl/lc/Sequences/usr_lc_seq.seq"
+  },
+  {
+    "id": "R01-xml-comment-connection",
+    "rule": "jrxml-moca-connection-invalid",
+    "expected": false,
+    "source": "<jasperReport><!-- <parameter name=\"MOCA_REPORT_CONNECTION\"><defaultValueExpression>localhost</defaultValueExpression></parameter> --></jasperReport>",
+    "file": "les/reports/label.jrxml"
+  },
+  {
+    "id": "R02-connection-comment-body",
+    "rule": "jrxml-moca-connection-invalid",
+    "expected": false,
+    "source": "<jasperReport><parameter name=\"MOCA_REPORT_CONNECTION\"><property name=\"MOCA\" value=\"true\"/><!-- <defaultValueExpression>localhost</defaultValueExpression> --></parameter></jasperReport>",
+    "file": "les/reports/label.jrxml"
+  },
+  {
+    "id": "R03-rptid-other-parameter",
+    "rule": "rpt-id-mismatch",
+    "expected": false,
+    "source": "<jasperReport><parameter name=\"rpt_id\"/><parameter name=\"other\" value=\"OtherReport\"/></jasperReport>",
+    "file": "les/reports/label.jrxml"
+  },
+  {
+    "id": "D02-native-create-table",
+    "rule": "database-table-missing-primary-key",
+    "expected": true,
+    "source": "CREATE TABLE usr_lc_other (id NUMBER)",
+    "file": "les/db/ddl/lc/Tables/usr_lc_probe.tbl"
+  },
+  {
+    "id": "D03-native-table-name",
+    "rule": "database-name-mismatch",
+    "expected": true,
+    "source": "CREATE TABLE usr_lc_other (id NUMBER PRIMARY KEY)",
+    "file": "les/db/ddl/lc/Tables/usr_lc_probe.tbl"
+  },
+  {
+    "id": "D04-alter-plugin-column",
+    "rule": "database-alter-non-lc-table",
+    "expected": true,
+    "source": "[ALTER_TABLE_ADD_COLUMN_BEGIN(usr_pd_core, bad_column) STRING_TY(20) ALTER_TABLE_ADD_COLUMN_END] catch(ERR_COLUMN_ALREADY_EXISTS)",
+    "file": "les/db/ddl/lc/Tables/usr_lc_probe.tbl"
+  },
+  {
+    "id": "L01-non-sql-ctl",
+    "rule": "ctl-direct-script",
+    "expected": true,
+    "source": "list policies where polcod='LC_EXAMPLE'",
+    "file": "les/db/data/load/lc/safetoload/example.ctl"
+  },
+  {
+    "id": "L02-comment-include",
+    "rule": "ctl-direct-script",
+    "expected": true,
+    "source": "/* include */ [select id from sample]",
+    "file": "les/db/data/load/lc/safetoload/example.ctl"
+  },
+  {
+    "id": "L03-unload-warning",
+    "rule": "ctl-direct-script",
+    "expected": true,
+    "source": "[delete sample where id='@id@'] catch(-1403)",
+    "file": "les/db/data/unload/lc/safetoload/sample.ctl"
+  },
+  {
+    "id": "C11-raw-outside-sql",
+    "rule": "raw-usage",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[list lc other where column=@column:raw]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C12-list-change-record",
+    "rule": "list-get-no-update",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[change record where table='sample' and id=@id and value=1]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C13-list-create-record",
+    "rule": "list-get-no-insert",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[create record where table='sample' and id=@id]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C14-list-remove-record",
+    "rule": "list-get-no-delete",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[remove record where table='sample' and id=@id]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C15-outside-policy-guard",
+    "rule": "by-command-policy",
+    "expected": true,
+    "source": "<command><name>process inventory move</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[list policies where polcod='CUSTOM' | if (@rtnum1=1) {publish data where x=1} else {^process inventory move} | publish data where unguarded=1]]></local-syntax></command>",
+    "file": "process_inventory_move.mcmd"
+  },
+  {
+    "id": "C16-adjacent-line-comment",
+    "rule": "select-missing-comment",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[-- No existing MOCA list command, use select statement instead.\n[select id from sample_view]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C17-poldat-warning",
+    "rule": "select-from-non-view",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[/* No existing MOCA list command, use select statement instead. Use poldat instead of poldat_view for performance. */ [select x from poldat]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "C18-poldat-join-comment",
+    "rule": "select-from-non-view-missing-comment",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[/* No existing MOCA list command, use select statement instead. */ [select p.x from poldat p join sample_view v on v.id=p.id]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "T01-catch-without-command",
+    "rule": "trigger-single-command",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[catch(-1403)]]></local-syntax></command>",
+    "file": "before-list_lc_probe.mtrg"
+  },
+  {
+    "id": "S01-decode-zero-default",
+    "rule": "division-zero-guard",
+    "expected": true,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[[select a / decode(b,0,null,1,0,b) value from sample_view]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "S02-outer-case-guard",
+    "rule": "division-zero-guard",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[[select case when b=0 then 0 else case when x=0 then 0 else a/b end end value from sample_view]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "S03-case-shortcircuit-not-equal",
+    "rule": "division-zero-guard",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[[select case when b<>0 then a/b else 0 end value from sample_view]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "S04-qualified-nullif-expression",
+    "rule": "division-zero-guard",
+    "expected": false,
+    "source": "<command><name>list lc probe</name><description>probe</description><type>Local Syntax</type><local-syntax><![CDATA[[select a/(nullif(b,0)) value from sample_view]]]></local-syntax></command>",
+    "file": "list_lc_probe.mcmd"
+  },
+  {
+    "id": "D05-orca-safetoload",
+    "rule": "orca-table-not-registered",
+    "expected": false,
+    "source": "[CREATE_TABLE(usr_lc_registered)(id INT_TY not null)] [CREATE_PK_CONSTRAINT_BEGIN(usr_lc_registered) PRIMARY_KEY(id) CREATE_PK_CONSTRAINT_END]",
+    "file": "les/db/ddl/lc/Tables/usr_lc_registered.tbl"
+  },
+  {
+    "id": "D06-comment-unload-index",
+    "rule": "index-unload-missing",
+    "expected": true,
+    "source": "[CREATE_INDEX_BEGIN(by_table,usr_lc_sample_idx) INDEX_COLUMN(id) CREATE_INDEX_END]",
+    "file": "les/db/ddl/lc/Indexes/usr_lc_sample_idx.idx"
+  },
+  {
+    "id": "L04-comment-postinstall",
+    "rule": "postinstall-mload-all-missing",
+    "expected": true,
+    "source": "#!/bin/sh\n# mload_all les/db/data/unload\necho complete\n",
+    "file": "rpmbuild/app/postinstall/allnodes/isccustom.sh"
+  },
+  {
+    "id": "L05-comment-unload-catch",
+    "rule": "unload-ctl-invalid",
+    "expected": true,
+    "source": "[delete sample where id='@id@'] /* catch(-1403) */",
+    "file": "les/db/data/unload/lc/safetoload/sample.ctl"
+  },
+  {
+    "id": "L06-csv-cross-row-sql",
+    "rule": "csv-contains-sql",
+    "expected": false,
+    "source": "key,value\nfirst,select\nsecond,from\n",
+    "file": "les/db/data/load/lc/safetoload/sample/lc_sample.csv"
+  },
+  {
+    "id": "L07-version-order",
+    "rule": "config-action-version",
+    "expected": true,
+    "source": "/* Config actions import script v2.6.200 */\ninclude base",
+    "file": "les/db/data/load/lc/safetoload/lc-config_actions.ctl"
+  }
+]

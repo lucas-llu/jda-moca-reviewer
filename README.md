@@ -19,7 +19,7 @@ npm run compile
 npx --yes @vscode/vsce@2.15.0 package --no-dependencies --ignoreFile .github/vsix.ignore
 ```
 
-The generated package is `code-reviewer-<version>.vsix` (currently `code-reviewer-0.0.4.vsix`).
+The generated package is `code-reviewer-<version>.vsix` (currently `code-reviewer-0.0.5.vsix`).
 
 ### Release downloads
 

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { maskCode, matching, catchArguments } from '../analysis';
 
 export interface ReviewDocument {
     fileName: string;
@@ -42,37 +43,13 @@ function issueAt(
 }
 
 function maskComments(code: string): string {
-    const chars = code.split('');
-    let index = 0;
-    const blank = (start: number, end: number) => {
-        for (let i = start; i < end; i++) {
-            if (chars[i] !== '\n' && chars[i] !== '\r') {
-                chars[i] = ' ';
-            }
-        }
-    };
-    while (index < code.length) {
-        if (code.startsWith('/*', index)) {
-            const end = code.indexOf('*/', index + 2);
-            blank(index, end === -1 ? code.length : end + 2);
-            index = end === -1 ? code.length : end + 2;
-            continue;
-        }
-        if (code.startsWith('--', index)) {
-            const end = code.indexOf('\n', index + 2);
-            blank(index, end === -1 ? code.length : end);
-            index = end === -1 ? code.length : end;
-            continue;
-        }
-        index++;
-    }
-    return chars.join('');
+    return maskCode(code, true, true);
 }
 
 function extractCreateTableNames(text: string): string[] {
     const mask = maskComments(text);
     const names: string[] = [];
-    const pattern = /\bCREATE_TABLE\s*\(\s*("[^"]+"|[a-z0-9_$#]+)\s*\)/gi;
+    const pattern = /\b(?:CREATE_TABLE\s*\(\s*|CREATE\s+TABLE\s+)("[^"]+"|[a-z0-9_$#]+)/gi;
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(mask)) !== null) {
         names.push(match[1].replace(/["\s]/g, ''));
@@ -132,7 +109,8 @@ function findClosingParen(text: string, openIndex: number): number {
 
 function extractCreateTableBlock(text: string): string | undefined {
     const mask = maskComments(text);
-    const match = /\bCREATE_TABLE\s*\(\s*("[^"]+"|[a-z0-9_$#]+)\s*\)\s*\(/i.exec(mask);
+    const match = /\bCREATE_TABLE\s*\(\s*("[^"]+"|[a-z0-9_$#]+)\s*\)\s*\(/i.exec(mask)
+        || /\bCREATE\s+TABLE\s+("[^"]+"|[a-z0-9_$#]+)\s*\(/i.exec(mask);
     if (!match) {
         return undefined;
     }
@@ -178,6 +156,7 @@ function findProjectRoot(fileName: string): string | undefined {
 function findOrcaCsvFiles(workspaceRoot: string): string[] {
     const candidates = [
         path.join(workspaceRoot, 'les', 'db', 'data', 'load', 'lc', 'bootstraponly', 'usr_lc_orca_tables'),
+        path.join(workspaceRoot, 'les', 'db', 'data', 'load', 'lc', 'safetoload', 'usr_lc_orca_tables'),
         path.join(workspaceRoot, 'les', 'db', 'data', 'load', 'lc', 'orcaload')
     ];
     const files: string[] = [];
@@ -268,7 +247,7 @@ export function performDatabaseTableReview(document: ReviewDocument): McmdIssue[
 
     const createBlock = extractCreateTableBlock(text);
     for (const alter of extractAlterColumns(text)) {
-        if (!isLocalCustomisationObject(alter.table) && !isPluginObject(alter.table)) {
+        if (!(expectedPrefix === 'usr_pd_' ? isPluginObject(alter.table) : isLocalCustomisationObject(alter.table))) {
             issues.push(issueAt(file, text, alter.index, vscode.DiagnosticSeverity.Error, `New fields must not be added to BY/Core/Plugin table '${alter.table}'`, 'database-alter-non-lc-table'));
         }
         if (createBlock && !new RegExp(`\\b${alter.column}\\b`, 'i').test(createBlock)) {
@@ -289,7 +268,8 @@ export function performDatabaseTableReview(document: ReviewDocument): McmdIssue[
         const orcaFiles = findOrcaCsvFiles(workspaceRoot);
         const registered = orcaFiles.some(csvFile => {
             const content = fs.readFileSync(csvFile, 'utf8');
-            return new RegExp(`(?:^|,|\\s)${tableName}(?:,|\\s|$)`, 'i').test(content);
+            const escaped = tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return new RegExp(`(?:^|[,\\r\\n])\\s*"?${escaped}"?\\s*(?=,|\\r|\\n|$)`, 'i').test(content);
         });
         if (!registered) {
             issues.push(issueAt(file, text, 0, vscode.DiagnosticSeverity.Error, `New LC table '${tableName}' must be registered in an usr_lc_orca_tables CSV`, 'orca-table-not-registered'));
@@ -321,7 +301,11 @@ export function performDatabaseIndexReview(document: ReviewDocument): McmdIssue[
             const unloadFiles = findIndexUnloadFiles(workspaceRoot);
             const hasUnload = unloadFiles.some(fileName => {
                 const content = fs.readFileSync(fileName, 'utf8');
-                return content.toLowerCase().includes(create.index.toLowerCase());
+                const code = maskCode(content, true, true);
+                const escaped = create.index.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                return new RegExp(`\\bDROP\\s+INDEX\\s+(?:IF\\s+EXISTS\\s+)?(?:[\\w$#]+\\.)?"?${escaped}"?(?![\\w$#])`, 'i').test(code)
+                    || [...code.matchAll(/\bDROP_INDEX(?:_BEGIN)?\s*\(([^)]*)\)/gi)].some(m =>
+                        m[1].split(',').pop()?.replace(/["\s]/g, '').toLowerCase() === create.index.toLowerCase());
             });
             if (!hasUnload) {
                 issues.push(issueAt(file, text, 0, vscode.DiagnosticSeverity.Error, `Index '${create.index}' on BY/Core/Plugin table requires an index unload DDL file`, 'index-unload-missing'));
@@ -346,7 +330,12 @@ export function performDatabaseSequenceReview(document: ReviewDocument): McmdIss
     if (!new RegExp(`^${expectedPrefix}`, 'i').test(sequenceName)) {
         issues.push(issueAt(file, text, 0, vscode.DiagnosticSeverity.Error, `Sequence '${sequenceName}' must start with '${expectedPrefix}'`, 'database-prefix-invalid'));
     }
-    if (!/catch\s*\(\s*-?955\b/i.test(text)) {
+    const executable = maskCode(text);
+    const createAt = /\b(?:CREATE\s+SEQUENCE\b|CREATE_SEQUENCE\s*\()/i.exec(executable)?.index ?? -1;
+    const open = executable.lastIndexOf('[', createAt);
+    const close = open >= 0 ? matching(executable, open, '[', ']') : -1;
+    const catches = close >= 0 ? catchArguments(text, open, close) : [];
+    if (!catches.some(args => args.some(code => /^-?955$/.test(code)))) {
         issues.push(issueAt(file, text, 0, vscode.DiagnosticSeverity.Error, `Sequence '${sequenceName}' must catch -955 to be idempotent`, 'database-sequence-not-idempotent'));
     }
     return issues;
