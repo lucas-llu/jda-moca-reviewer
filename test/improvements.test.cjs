@@ -6,8 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const rules = require('../out/extension.js').__test;
-describe('list commands cannot invoke execute commands', () => {
-    const executeIssues = (syntax, name = 'list lc records') =>
+for (const name of ['list lc records', 'get lc records']) {
+describe(`${name}: cannot invoke execute commands`, () => {
+    const executeIssues = syntax =>
         rules.performMcmdReview(documentOf(fileFor(name), mcmd(name, syntax)))
             .filter(issue => issue.rule === 'list-no-execute-command');
 
@@ -20,12 +21,14 @@ describe('list commands cannot invoke execute commands', () => {
             'publish data where x=1; execute server command',
             '{ execute lc custom operation }',
             '^execute server command',
-            '/* required */ EXECUTE\nserver command'
+            '/* required */ EXECUTE\nserver command',
+            '/* approved */ execute os command where command=\'echo test\' catch(@?)'
         ]) {
             const issues = executeIssues(syntax);
             assert.equal(issues.length, 1, syntax);
             assert.equal(issues[0].severity, 0);
-            const sourceLine = mcmd('list lc records', syntax).split('\n')[issues[0].line - 1];
+            assert.match(issues[0].message, /List\/get/);
+            const sourceLine = mcmd(name, syntax).split('\n')[issues[0].line - 1];
             assert.match(sourceLine.slice(issues[0].column - 1), /^execute\b/i);
         }
     });
@@ -54,11 +57,14 @@ describe('list commands cannot invoke execute commands', () => {
         }
     });
 
-    test('does not restrict get or process command prefixes', () => {
-        for (const name of ['get lc records', 'process lc records', 'listings lc records']) {
-            assert.deepEqual(executeIssues('execute server command', name), []);
-        }
-    });
+});
+}
+
+test('execute prohibition does not restrict other command prefixes', () => {
+    for (const name of ['process lc records', 'listings lc records', 'getaway lc records']) {
+        const issues = rules.performMcmdReview(documentOf(fileFor(name), mcmd(name, 'execute server command')));
+        assert.ok(!issues.some(issue => issue.rule === 'list-no-execute-command'));
+    }
 });
 describe('SQL concurrency and UPDATE safety', () => {
     const review = syntax => rules.performMcmdReview(documentOf(fileFor('process lc safety'), mcmd('process lc safety', syntax)));

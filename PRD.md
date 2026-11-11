@@ -108,6 +108,11 @@
   - `/* Start copy from BY/Core/Plugin <command> */`
   - `/* End copy from BY/Core/Plugin <command> */`（AC-12）
 - [Error] 如果对复制代码中的某个 SQL 做了任何修改，则整个 SQL 都必须符合当前规范，不能只检查修改的行。
+- [Warning] Local Syntax 中实际使用字符串连接运算符 `||` 时，每个 command 提醒一次：检查单词、字面量和变量之间是否有空格或分隔符。即使已有空格或注释仍保留提醒；MOCA 与内嵌 SQL 中的连接均检查，注释/字符串中的 `||` 以及单个管道 `|` 不检查，不推断变量类型或自动改写字符串。
+- [Warning] 实际执行 `commit`（含 SQL block 中的 COMMIT）时必须有紧邻说明注释，说明事务提交的安全性；缺少注释时提示，不报 Error。支持块注释、行注释和连续注释，不跨其他可执行语句借用说明，不评价注释内容质量。
+- [Warning] 实际 SQL optimizer hint（`/*+ ... */` 或 `--+ ...`）必须有紧邻 SQL block 或 hint 的普通说明注释；缺少时提示其用途需要说明，不报 Error。Hint 自身不能作为说明，普通 SELECT 原因注释可满足格式检查；不评价 hint 的性能。
+- [Warning] Command 显式字符串中声明文件系统路径时，检查是否包含独立的 `shared` 目录段（大小写不敏感），推荐 `$LESDIR/files/shared/...`。检查绝对 Unix/Windows/UNC 路径和 `$VAR/...`、`${VAR}/...`；连续静态字符串连接可合并判断，不把 `|| '/suffix'` 的后续片段单独当绝对路径。跳过多行脚本文本、以块注释开头的脚本文本及明确赋给 xpath/xml_path/url/uri/regex/pattern 的字符串，不把 URL、单独的 `/`、注释或纯运行时变量当作明确目录。未包含 shared 时提醒人工确认共享存储，不证明目录真实挂载情况；动态路径拼接仍需开发者确认。
+- SQL 中 `EXTRACTVALUE`、`EXTRACT`、`EXISTSNODE`（未限定或以 SYS 限定）的第二参数是 XPath，不按文件目录检查；按最内层实际函数调用及参数位置识别，支持分组括号、嵌套 XML 输入和注释，不因字符串中的逗号/括号而错位。其他参数、其他函数、嵌套文件读取函数的目录和后续普通路径仍需检查；不以此豁免整个 SQL。`logo = '/reports/' || @name` 是文件系统路径，缺少 shared 时仍保留 Warning。
 - [Error] Plugin 中不得直接引用 Local Customisation 层级的 artifact、表名或其版本，因为安装 Plugin 时这些对象可能尚不存在，实际名称也可能不同。Plugin 必须在自身配置表中提供默认 artifact 名称；Local Customisation 如需覆盖，应通过本层级的 `.ctl`/`.csv` 和 `mload_all` 写入配置。（AC-30）
   - 配置记录至少应能区分 artifact type/id、artifact name 和优先层级；调用方按优先层级选择生效记录。
   - Wiki 示例中 Plugin 默认记录使用较低层级，Local Customisation CSV 使用较高层级覆盖；具体数值属于项目配置，不应硬编码为通用规则。
@@ -126,6 +131,7 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
 对应规则：
 
 - [Error] Complex SQL 只能放在 `<name>` 第一个单词为 `list` 或 `get` 的独立 command 中。
+- [Warning] 仅由一个 SELECT SQL block（允许 catch）构成的 `list` command，若 SELECT 只返回一个显式字段/表达式，且其自身 WHERE 通过 `ROWNUM < 2` 或 `ROWNUM = 1` 限制为单行，则提示改为 `get`。忽略函数/子查询内部逗号和注释/字符串中的关键字；`*`/`alias.*` 不算单字段。子查询内部的 ROWNUM、未受限制的 OR 分支、UNION、多 SQL block 或其他 MOCA command 调用不据此推断最终结果。暂不自动扩展到 `ROWNUM <= 1`、FETCH FIRST 或数据库唯一键推断。
 - 所有 `[select ...]` 都必须有紧邻注释，注释应为 `/* No existing MOCA list command, use select statement instead. */`，说明为什么不用 MOCA list command；插件不检查是否应复用为简单 command。
 
 ### 2.5 SQL 使用规范
@@ -134,7 +140,7 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
 - [Warning] 使用 `INSERT`、`UPDATE` 或 `DELETE` 时始终报告 Warning。DML 目标是物理表，不执行 `_view` 检查。SQL 必须有紧邻注释并明确提到对应的现有 command，说明为什么不能使用它：INSERT 对应 `create record`，UPDATE 对应 `change record`，DELETE 对应 `remove record`；例如 mass update、更新主键或先查询 key 会造成性能问题。只有普通注释、但没有提到对应 command 时仍视为缺少说明，并额外报告 `[Error]`。
 - [Error] `list`/`get` command 不允许包含任何新增、修改或删除数据库数据的逻辑，包括 `INSERT`、`UPDATE`、`DELETE`。（AC-14）
 - 上述职责限制同样适用于直接调用 `create record`、`change record`、`remove record`；不据此对普通 process 中的 change record 新增 catch 要求。
-- [Error] 第一个单词为 `list` 的 command，其 Local Syntax 中禁止直接调用第一个单词为 `execute` 的 MOCA command（如 `execute server command`、`execute os command`，以及其他 `execute ...`）。检查管道、分号、嵌套代码块及无花括号的 if/else/catch 分支，`^execute ...` override 调用同样禁止；按关键字不区分大小写。注释、字符串字面量、SQL/Groovy 块、参数名及命令名称中非首词的 execute 不触发此规则。只检查当前 command 的直接调用，不递归分析被调用 command；本条不扩展至 `get` 或其他前缀。
+- [Error] 第一个单词为 `list` 或 `get` 的 command，其 Local Syntax 中禁止直接调用第一个单词为 `execute` 的 MOCA command（如 `execute server command`、`execute os command`，以及其他 `execute ...`）；这些调用行为不可控，即使有注释或 catch 也不能豁免。检查管道、分号、嵌套代码块及无花括号的 if/else/catch 分支，`^execute ...` override 调用同样禁止；按关键字不区分大小写。注释、字符串字面量、SQL/Groovy 块、参数名及命令名称中非首词的 execute 不触发此规则。只检查当前 command 的直接调用，不递归分析被调用 command；不扩展至 `process` 或其他前缀。为兼容已有诊断标识，list/get 均使用 `list-no-execute-command`。
 - [Warning] `MAX()` / `MIN()` 仅在结果疑似用于生成新序号时提示，同一 SQL 块最多一次。直接 `MAX(xxx)+1`、`NVL(MAX(xxx),0)+1`、`MIN(xxx)-1`、正整数或变量步长，以及取出极值后在后续赋值中递增/递减均提示；字段名不必包含 id/seq。跟踪同一 command 内 SELECT 的未加引号别名、后续 `publish data` 复制/改名及 SQL SELECT 复制/改名，再检查后续计算、create/change/add/update command 参数或 SQL INSERT/UPDATE 赋值。覆盖赋值为不依赖原极值的新值后停止跟踪该变量。
   - 同样识别 `MAX(column+1)`、`MAX(TO_NUMBER(column)+1)`。只检查作用于聚合结果或其派生变量的加减，不将聚合参数内部的 SUBSTR/INSTR/LENGTH 位置运算、其他 CASE 分支或 NVL 默认值中的 `+1` 当作序号生成。
   - 普通 MAX/MIN 统计、`MAX(DECODE(...))` 字符串字段提取、只读极值/最新状态查询、WHERE 条件中的查找，以及直接复制原始极值（未加减生成新值）的写入不触发此序号分配 Warning。`+0` 不视为生成新序号。注释、字符串中的关键字和运算符不检测。数量、重量、价格、日期等明显度量字段按常见列名/结果别名后缀识别并排除（如 qty、wgt、dte、time、untcas），但显式 id/seq 等序号结果别名优先；该分类不是数据库列类型验证。
@@ -172,6 +178,7 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
 - [Error] 禁止在 BY、Core 或 Plugin 的表上新增字段。
 - [Error] 在 BY、Core 或 Plugin 的表上新增 index 时，必须提供对应的 index unload DDL 文件。（AC-7）
 - [Error] 对表字段进行新增、修改或删除时，必须同步修改原始 table creation script。
+- [Error] `.tbl` 中显式新增列（`ALTER_TABLE_ADD_COLUMN_BEGIN` 或原生 `ALTER TABLE ... ADD [COLUMN]`，含一次新增多列）时，必须在对应表的 `create db documentation where table = '<table>' and <column> = '<非空说明>'` 中提供该列说明。支持同文件说明、同层 `Documentation/<table>.doc`/`.tdoc`，以及 `.tbl` 显式 include 的 `.doc`/`.tdoc`（相对 Tables 或同层 Documentation 解析，不能越出该 DDL 层目录）。表/列名按大小写不敏感比较；其他表、注释或字符串里的伪造声明不算。检查说明存在与非空，不评价内容质量；无显式 ADD 时不靠 Git 推断 CREATE 定义中的新增列。审查 `.tbl` 时读取已保存的 documentation 依赖，不单独扫描 `.doc`/`.tdoc`。
 - [Error] 表结构及数据布局变更必须是幂等的；如果增加 alter script，还必须同步更新 create script，并正确处理“变更已存在”和“主键发生变化”等场景。（AC-13）
 - [Error] 每个 Local Customisation 新建表都必须在 `usr_lc_orca_tables` 中登记，并通过 Local Customisation 的 CSV 文件交付该记录。（AC-22）
 - ORCA 登记查找包含合法的 bootstraponly、safetoload 与 orcaload 布局；index unload 必须包含针对完整对象名的实际卸载操作，不能仅凭注释提到对象名认定依赖存在。对象检查兼容 CREATE_TABLE 宏及原生 CREATE TABLE；sequence 的 catch 必须附属于创建语句或其包围块。
@@ -183,6 +190,9 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
 
 - [Error] `cust_lvl`：LC 仓库必须为 100 或更高；PD 插件仓库不检查该下限。
 - [Error] CSV 文件中不允许包含 SQL。
+- [Error] CSV 不允许定义名为 `if`、`else`、`elseif` 或 `else if` 的字段/单元格，或在字段中写 `if(...)`、`else {...}`、`else if(...)` 及语句起始处无花括号的 `else command` 控制逻辑。检查 CSV 解码后的逻辑字段（含多行字段），普通说明文本、被 MOCA 字符串或注释包裹的示例不因仅提到这些关键字而报错。本阶段不新增通用“只能调用一个 command”的语句数规则。
+- [Error] Configurable RF 表 CSV（表目录匹配 `rf_*` 或 `usr_uc_rf_*`/`usr_lc_rf_*`/`usr_pd_rf_*`）中，`wh_id` 为 `----` 时，已提供的 `category`、`menu_item`、`mnu_grp`（实际 menu item 字段）必须为空/纯空白。不增加指定仓库时必须填写这些字段的反向要求，不对其他业务表和 unload 删除键执行该约束。
+- [Error] `job_definition` 的 load CSV 中，每条 job 的 `log_file`/`logfile` 必须包含 `${HOSTNAME}` 或 `$HOSTNAME`；缺列、空值或没有该环境变量均报错。允许其他日志目录，不强制具体文件名；unload CSV 不执行日志配置检查。
 - SQL 检测按 CSV 逻辑字段判断，允许带引号的多行字段，但不得将不同行/字段里的普通关键字拼成一段 SQL。Config Action 版本号按 major/minor/patch 逐段比较，不采用数值加权相加。
 - [Error] `les_mls_cat` 文件中：
   - LC 仓库：error 类型记录的编号必须在 `err4000000` 至 `err4999999` 范围内；非 error 类型记录必须以 `lc` 开头。
@@ -196,6 +206,7 @@ Complex SQL 按整个 `.mcmd` 统计，而不是分别按单个 `[...]` block �
   - `swift-pd-customisations-kni-fw`：`err3900000` 至 `err3900500`，group `pd_kni-errmsg`。
   - `swift-pd-customisations-warehouseautomation`：`err3981000` 至 `err3981499`，group `pd_whauto`。
 - [Warning] `.ctl` 未使用 `include`、而是直接包含 SQL 或其他 script 时始终报告 Warning。除 AC-23 unload `.ctl` 外，直接写脚本必须有紧邻注释；缺少注释时额外报告 `[Error]`。AC-23 的参数化 DELETE 属于合法例外，但仍保留 Warning。
+- [Error] 同一个 `.ctl` 不能重复引用相同 include 文件，支持 `#include <header.h>`、带引号和普通 `include` 形式。按完整目标路径比较，统一路径分隔符和 `./`，不同目录下的同名文件不视为重复，路径大小写保留；注释和字符串中的伪造指令不检查。不递归展开 include，也不检查条件编译分支是否互斥。
 - 用于 Load File Operations 的 `.ctl` 是否已获得 QA 批准属于人工审查，本阶段插件不检测。
 - [Error] Config Action `.ctl` 的版本必须不低于 `2.7.3`。（AC-33）
 - [Error] `.csv` 必须有对应的 `.ctl`；同类 artifact 的其他必需依赖也必须随代码一并提交。（OT-7）
@@ -309,6 +320,9 @@ PD 插件仓库等效写法：
 
 ## 9. 延期事项
 
+- TODO：Command 声明参数的类型检查；具体实现和合法类型集合尚未确定。
+- TODO：Integrator 和 CWS 模块新增规则，暂不扫描或实现。
+- TODO：Git commit message 的 Ticket 前缀检查及关联流程规则，暂不实现；现有分支名和 Jira 筛选行为保持不变。
 - TODO：Archive/Purge job 的扩展名、目录和新增检查规则；已有实现保持不变。
 - TODO：历史/备份文件的识别和排除模式。
 - TODO：Git 分支的 detached HEAD、非 Git 及多根工作区行为；允许 `develop`，feature 分支格式为 `feature/SWIFTLEX-*`，允许下划线和连字符。
