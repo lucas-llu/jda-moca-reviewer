@@ -1527,11 +1527,11 @@ function checkSessionVariable(syntax: SyntaxContext, file: string, source: strin
     return issues;
 }
 
-function checkListExecuteCommands(commandName: string, syntax: SyntaxContext, file: string, source: string): McmdIssue[] {
-    if (!/^list(?:\s|$)/i.test(commandName.trim())) { return []; }
+function checkListGetExecuteCommands(commandName: string, syntax: SyntaxContext, file: string, source: string): McmdIssue[] {
+    if (!/^(?:list|get)(?:\s|$)/i.test(commandName.trim())) { return []; }
     return commandCalls(syntax.content).filter(call => /^execute\b/i.test(call.mask)).map(call =>
         issueAt(file, source, syntax.contentOffset + call.start, vscode.DiagnosticSeverity.Error,
-            'List commands must not invoke MOCA commands starting with execute', 'list-no-execute-command'));
+            'List/get commands must not invoke MOCA commands starting with execute', 'list-no-execute-command'));
 }
 
 function checkExecuteServerCommand(syntax: SyntaxContext, file: string, source: string): McmdIssue[] {
@@ -1559,6 +1559,120 @@ function checkSendEmail(syntax: SyntaxContext, file: string, source: string): Mc
     return issues;
 }
 
+function isSqlXmlXPathLiteral(mask: string, blocks: BracketBlock[], index: number): boolean {
+    const block = blocks.find(item => item.startIndex < index && index < item.endIndex);
+    if (!block) { return false; }
+    const start = block.startIndex + 1;
+    if (!/^\s*(?:select|with|insert|update|delete)\b/i.test(mask.slice(start, block.endIndex))) { return false; }
+    const frames: { name?: string; argument: number }[] = [];
+    // Position-preserving masking removes quoted/comment punctuation. Count only
+    // commas in the current parenthesis frame, not commas in nested XML inputs.
+    for (let position = start; position < index; position++) {
+        if (mask[position] === '(') {
+            const name = /([a-z_$#][\w$#]*(?:\s*\.\s*[a-z_$#][\w$#]*)*)\s*$/i.exec(mask.slice(start, position))?.[1];
+            frames.push({ name: name?.replace(/\s+/g, '').toLowerCase(), argument: 0 });
+        } else if (mask[position] === ')') {
+            frames.pop();
+        } else if (mask[position] === ',' && frames.length) {
+            frames[frames.length - 1].argument++;
+        }
+    }
+    // Grouping parentheses do not change an argument's meaning. A nested file
+    // reader does: do not exempt its literal just because XML wraps that call.
+    const call = [...frames].reverse().find(frame => frame.name !== undefined);
+    return call?.argument === 1 && /^(?:sys\.)?(?:extractvalue|extract|existsnode)$/.test(call.name!);
+}
+
+function checkCommandReminders(syntax: SyntaxContext, blocks: BracketBlock[], file: string, source: string): McmdIssue[] {
+    const code = syntax.content, mask = maskCode(code), issues: McmdIssue[] = [];
+    const add = (index: number, message: string, rule: string) => issues.push(
+        issueAt(file, source, syntax.contentOffset + index, vscode.DiagnosticSeverity.Warning, message, rule));
+    const concat = /\|\|/.exec(mask);
+    if (concat) {
+        add(concat.index, 'String concatenation is used; check spaces or separators between words and variable values', 'string-concatenation-spacing');
+    }
+    for (const call of commandCalls(code)) {
+        if (!/^commit\s*(?:catch\s*\(|$)/i.test(call.mask)) { continue; }
+        const end = call.start + call.mask.trimEnd().length;
+        if (!adjacentComments(code, call.start, end).length) {
+            add(call.start, 'COMMIT requires an adjacent comment explaining transaction safety', 'commit-safety-comment');
+        }
+    }
+    const comments = triviaSpans(code).filter(span => span.kind === 'comment');
+    for (const block of blocks) {
+        const commit = /^\s*commit\s*$/i.test(maskCode(block.content))
+            ? /\bcommit\b/i.exec(maskCode(block.content)) : undefined;
+        if (commit && !hasAdjacentComment(code, block, commit.index)
+            && !adjacentComments(code, block.startIndex + 1 + commit.index, block.startIndex + 1 + commit.index + 6).length) {
+            add(block.startIndex + 1, 'COMMIT requires an adjacent comment explaining transaction safety', 'commit-safety-comment');
+        }
+        const hints = comments.filter(span => span.start > block.startIndex && span.end <= block.endIndex && /^\/\*\+|^--\+/.test(span.text));
+        if (!hints.length) { continue; }
+        const explanatory = [...adjacentComments(code, block.startIndex, block.endIndex + 1),
+            ...hints.flatMap(hint => adjacentComments(code, hint.start, hint.end))]
+            .some(comment => !/^\/\*\+|^--\+/.test(comment));
+        if (!explanatory) {
+            add(hints[0].start, 'Optimizer hints require an adjacent non-hint comment explaining their purpose', 'optimizer-hint-comment');
+        }
+    }
+    const literals = triviaSpans(code).filter(span => span.kind === 'string');
+    for (const [index, span] of literals.entries()) {
+        // A '/suffix' after || is not an independently declared absolute path.
+        if (/\|\|\s*$/.test(mask.slice(0, span.start))) { continue; }
+        let value = span.text.slice(1, -1);
+        for (let next = index + 1; next < literals.length; next++) {
+            if (!/^\s*\|\|\s*$/.test(mask.slice(literals[next - 1].end, literals[next].start))) { break; }
+            value += literals[next].text.slice(1, -1);
+        }
+        value = value.trim();
+        if (/[\r\n]/.test(value) || /^\/\*/.test(value)
+            || /\b(?:xpath|xml_path|url|uri|regex|pattern)\s*=\s*$/i.test(mask.slice(0, span.start))) { continue; }
+        // Inspect explicit filesystem literals, not URLs, bare separators or runtime-only variables.
+        if (!/^(?:\$[a-z_][\w]*[\\/]|\$\{[a-z_][\w]*\}[\\/]|[a-z]:[\\/]|\\\\[^\\]+[\\/]|\/(?!\/)[^\s/])/i.test(value)) { continue; }
+        if (isSqlXmlXPathLiteral(mask, blocks, span.start)) { continue; }
+        if (!/(?:^|[\\/])shared(?:[\\/]|$)/i.test(value)) {
+            add(span.start, 'Explicit filesystem path has no shared directory; prefer $LESDIR/files/shared/... and verify shared storage', 'command-path-not-shared');
+        }
+    }
+    return issues;
+}
+
+function checkSingleValueList(name: string, syntax: SyntaxContext, blocks: BracketBlock[], file: string, source: string): McmdIssue[] {
+    // Do not infer a command's final result from one lookup among multiple statements.
+    if (!/^list\s/i.test(name.trim()) || blocks.length !== 1 || commandCalls(syntax.content).length) { return []; }
+    const block = blocks[0], mask = maskCode(block.content), depths = parenDepths(mask);
+    const select = [...mask.matchAll(/\bselect\b/gi)].find(match => depths[match.index!] === 0);
+    if (!select || [...mask.matchAll(/\bunion\b/gi)].some(match => depths[match.index!] === 0)) { return []; }
+    const items = selectItems(mask).filter(item => depths[item.start] === 0);
+    if (items.length !== 1 || /^(?:distinct\s+|all\s+)?(?:[\w$#"]+\s*\.\s*)?\*(?:\s|$)/i.test(mask.slice(items[0].start, items[0].end).trim())) { return []; }
+    const where = [...mask.matchAll(/\bwhere\b/gi)].find(match => match.index! > select.index! && depths[match.index!] === 0);
+    if (!where) { return []; }
+    const start = where.index! + where[0].length;
+    const end = [...mask.matchAll(/\b(?:group\s+by|order\s+by|having|connect\s+by|start\s+with|fetch)\b/gi)]
+        .find(match => match.index! > start && depths[match.index!] === 0)?.index ?? mask.length;
+    const guarded = (condition: string): boolean => {
+        condition = condition.trim();
+        while (condition[0] === '(' && matching(condition, 0) === condition.length - 1) { condition = condition.slice(1, -1).trim(); }
+        const depth = parenDepths(condition);
+        for (const operator of ['or', 'and']) {
+            const parts: string[] = [];
+            let after = 0;
+            for (const match of condition.matchAll(new RegExp(`\\b${operator}\\b`, 'gi'))) {
+                if (depth[match.index!] !== 0) { continue; }
+                parts.push(condition.slice(after, match.index)); after = match.index! + match[0].length;
+            }
+            if (parts.length) {
+                parts.push(condition.slice(after));
+                return operator === 'or' ? parts.every(guarded) : parts.some(guarded);
+            }
+        }
+        return /^rownum\s*(?:<\s*2|=\s*1)\s*$/i.test(condition);
+    };
+    if (!guarded(mask.slice(start, end).replace(/;\s*$/, ''))) { return []; }
+    return [issueAt(file, source, syntax.contentOffset + block.startIndex + 1 + select.index!, vscode.DiagnosticSeverity.Warning,
+        'This list command selects one field with ROWNUM < 2 or ROWNUM = 1; use a get command for a single value', 'list-single-value-use-get')];
+}
+
 export function performMcmdReview(document: ReviewDocument): McmdIssue[] {
     const text = document.getText();
     const file = document.fileName;
@@ -1578,8 +1692,10 @@ export function performMcmdReview(document: ReviewDocument): McmdIssue[] {
     issues.push(...checkGroovy(syntax, file, text));
     issues.push(...checkCopyMarkers(syntax, file, text));
     issues.push(...checkPluginReferences(name, syntax, file, text));
-    issues.push(...checkListExecuteCommands(name, syntax, file, text));
+    issues.push(...checkListGetExecuteCommands(name, syntax, file, text));
     const blocks = extractBracketBlocks(syntax.content);
+    issues.push(...checkCommandReminders(syntax, blocks, file, text));
+    issues.push(...checkSingleValueList(name, syntax, blocks, file, text));
     issues.push(...checkComplexSql(blocks, name, file, text, syntax.contentOffset));
     issues.push(...checkSelectComments(blocks, syntax, file, text));
     issues.push(...checkDml(blocks, name, file, text, syntax));

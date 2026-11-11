@@ -65,8 +65,10 @@ function issueAt(
     return { file, ...location, severity, message, rule };
 }
 
-function parseCsvRows(text: string): string[][] {
+function parseCsvRows(text: string): { rows: string[][]; starts: number[] } {
     const rows: string[][] = [];
+    const starts: number[] = [];
+    let rowStart = 0;
     let row: string[] = [];
     let field = '';
     let inQuotes = false;
@@ -95,9 +97,11 @@ function parseCsvRows(text: string): string[][] {
             row.push(field);
             if (row.some(value => value.trim().length > 0)) {
                 rows.push(row);
+                starts.push(rowStart);
             }
             row = [];
             field = '';
+            rowStart = index + 1;
         } else {
             field += char;
         }
@@ -105,24 +109,13 @@ function parseCsvRows(text: string): string[][] {
     row.push(field);
     if (row.some(value => value.trim().length > 0)) {
         rows.push(row);
+        starts.push(rowStart);
     }
-    return rows;
+    return { rows, starts };
 }
 
 function headerIndex(header: string[], name: string): number {
     return header.findIndex(value => value.trim().toLowerCase() === name.toLowerCase());
-}
-
-function rowStartIndex(text: string, dataRowIndex: number): number {
-    let lineStart = 0;
-    for (let line = 0; line <= dataRowIndex; line++) {
-        const newline = text.indexOf('\n', lineStart);
-        if (newline === -1) {
-            return text.length;
-        }
-        lineStart = newline + 1;
-    }
-    return lineStart;
 }
 
 function findCtlForCsv(fileName: string): string | undefined {
@@ -217,13 +210,45 @@ export function performCsvReview(document: ReviewDocument): McmdIssue[] {
     const text = document.getText();
     const file = document.fileName;
     const issues: McmdIssue[] = [];
-    const rows = parseCsvRows(text);
+    const { rows, starts } = parseCsvRows(text);
+    const rowStartIndex = (dataRowIndex: number) => starts[dataRowIndex + 1] ?? text.length;
     if (rows.length === 0) {
         return issues;
     }
     const header = rows[0];
     const normalized = normalizePath(file);
     const isPlugin = normalized.includes('/pd/') || normalized.includes('swift-pd-customisations-');
+
+    const isControl = (value: string) => /^(?:if|else|elseif|else\s+if)$/i.test(value.trim())
+        || /\b(?:if|elseif)\s*\(|\belse\s*(?:\{|if\s*\()|(?:^|[|;{}])\s*else(?=\s|$)/i.test(maskCode(value));
+    rows.forEach((row, index) => {
+        if (row.some(isControl)) {
+            issues.push(issueAt(file, text, starts[index], vscode.DiagnosticSeverity.Error,
+                'CSV fields must not declare if/else control flow; move logic into a command', 'csv-control-flow'));
+        }
+    });
+    if (!isUnloadPath(file)) {
+        const table = path.basename(path.dirname(file)).toLowerCase();
+        const wh = headerIndex(header, 'wh_id');
+        const rfFields = ['category', 'menu_item', 'mnu_grp'].map(field => headerIndex(header, field)).filter(index => index >= 0);
+        if (/^(?:usr_(?:uc|lc|pd)_)?rf_/.test(table) && wh >= 0 && rfFields.length) {
+            rows.slice(1).forEach((row, index) => {
+                if (row[wh]?.trim() === '----' && rfFields.some(field => row[field]?.trim())) {
+                    issues.push(issueAt(file, text, starts[index + 1], vscode.DiagnosticSeverity.Error,
+                        'Configurable RF category/menu item (mnu_grp) must be empty when wh_id is ----', 'rf-global-menu-fields'));
+                }
+            });
+        }
+        if (table === 'job_definition' || /^(?:lc|pd)_job_definition(?:[_-]|\.)/i.test(path.basename(file))) {
+            const log = ['log_file', 'logfile'].map(field => headerIndex(header, field)).find(index => index >= 0);
+            rows.slice(1).forEach((row, index) => {
+                if (log === undefined || !/\$(?:\{HOSTNAME\}|HOSTNAME\b)/.test(row[log] ?? '')) {
+                    issues.push(issueAt(file, text, starts[index + 1], vscode.DiagnosticSeverity.Error,
+                        'Job logfile must include ${HOSTNAME} or $HOSTNAME to distinguish hosts', 'job-logfile-hostname'));
+                }
+            });
+        }
+    }
 
     if (rows.slice(1).some(row => row.some(value => hasSqlOutsideQuotes(value)))) {
         issues.push(issueAt(file, text, 0, vscode.DiagnosticSeverity.Error, 'CSV rows must not contain SQL', 'csv-contains-sql'));
@@ -234,7 +259,7 @@ export function performCsvReview(document: ReviewDocument): McmdIssue[] {
         rows.slice(1).forEach((row, rowIndex) => {
             const value = Number(row[custLvlIndex]?.trim());
             if (!Number.isFinite(value) || value < 100) {
-                issues.push(issueAt(file, text, rowStartIndex(text, rowIndex), vscode.DiagnosticSeverity.Error, 'cust_lvl must be 100 or higher', 'cust-lvl-too-low'));
+                issues.push(issueAt(file, text, rowStartIndex(rowIndex), vscode.DiagnosticSeverity.Error, 'cust_lvl must be 100 or higher', 'cust-lvl-too-low'));
             }
         });
     }
@@ -250,16 +275,16 @@ export function performCsvReview(document: ReviewDocument): McmdIssue[] {
                 const number = Number(value.replace(/^err/i, ''));
                 const range = pluginRange ?? { start: 4000000, end: 4999999 };
                 if (number < range.start || number > range.end) {
-                    issues.push(issueAt(file, text, rowStartIndex(text, rowIndex), vscode.DiagnosticSeverity.Error, `les_mls_cat error ids must be between err${range.start} and err${range.end}`, 'mls-cat-invalid-id'));
+                    issues.push(issueAt(file, text, rowStartIndex(rowIndex), vscode.DiagnosticSeverity.Error, `les_mls_cat error ids must be between err${range.start} and err${range.end}`, 'mls-cat-invalid-id'));
                 }
                 const group = row[groupIndex]?.trim() || '';
                 if (isPlugin && pluginRange?.group && group.toLowerCase() !== pluginRange.group.toLowerCase()) {
-                    issues.push(issueAt(file, text, rowStartIndex(text, rowIndex), vscode.DiagnosticSeverity.Error, `les_mls_cat error group must be '${pluginRange.group}'`, 'mls-cat-invalid-group'));
+                    issues.push(issueAt(file, text, rowStartIndex(rowIndex), vscode.DiagnosticSeverity.Error, `les_mls_cat error group must be '${pluginRange.group}'`, 'mls-cat-invalid-group'));
                 }
             } else if (value && isPlugin && !/^pd_/i.test(value)) {
-                issues.push(issueAt(file, text, rowStartIndex(text, rowIndex), vscode.DiagnosticSeverity.Error, 'les_mls_cat non-error ids must start with pd_', 'mls-cat-invalid-id'));
+                issues.push(issueAt(file, text, rowStartIndex(rowIndex), vscode.DiagnosticSeverity.Error, 'les_mls_cat non-error ids must start with pd_', 'mls-cat-invalid-id'));
             } else if (value && !isPlugin && !/^lc/i.test(value)) {
-                issues.push(issueAt(file, text, rowStartIndex(text, rowIndex), vscode.DiagnosticSeverity.Error, 'les_mls_cat non-error ids must start with lc', 'mls-cat-invalid-id'));
+                issues.push(issueAt(file, text, rowStartIndex(rowIndex), vscode.DiagnosticSeverity.Error, 'les_mls_cat non-error ids must start with lc', 'mls-cat-invalid-id'));
             }
         });
     }
@@ -284,6 +309,17 @@ export function performCtlReview(document: ReviewDocument): McmdIssue[] {
     const issues: McmdIssue[] = [];
     const normalized = normalizePath(file);
     const code = maskCode(text, false);
+    const executable = maskCode(text);
+    const includes = new Set<string>();
+    for (const match of code.matchAll(/^[ \t]*(?:#[ \t]*)?include[ \t]+(?:<([^>\r\n]+)>|(["'])(.*?)\2|([^\s;]+))/gmi)) {
+        if (!/^[ \t]*(?:#[ \t]*)?include\b/i.test(executable.slice(match.index!))) { continue; }
+        const target = path.posix.normalize((match[1] ?? match[3] ?? match[4]).replace(/\\/g, '/'));
+        if (includes.has(target)) {
+            issues.push(issueAt(file, text, match.index!, vscode.DiagnosticSeverity.Error,
+                `Duplicate .ctl include '${target}'; keep only one reference`, 'ctl-duplicate-include'));
+        }
+        includes.add(target);
+    }
     const script = code.replace(/^[ \t]*#[^\r\n]*|^[ \t]*include\b[^\r\n]*/gmi,
         line => line.replace(/[^\r\n]/g, ' '));
     const firstScript = /\S/.exec(script)?.index ?? 0;

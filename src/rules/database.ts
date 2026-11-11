@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { maskCode, matching, catchArguments } from '../analysis';
+import { maskCode, matching, catchArguments, triviaSpans } from '../analysis';
 
 export interface ReviewDocument {
     fileName: string;
@@ -134,6 +134,89 @@ function extractAlterColumns(text: string): { table: string; column: string; ind
     return result;
 }
 
+function checkAddedColumnDocumentation(text: string, file: string): McmdIssue[] {
+    const code = maskCode(text, true, true);
+    const plain = maskCode(text);
+    const identifier = '(?:"[^"\\r\\n]+"|[a-z_$#][\\w$#]*)';
+    const name = (value: string) => value.replace(/"/g, '').toLowerCase();
+    const added: { table: string; column: string; index: number }[] = [];
+    for (const match of code.matchAll(new RegExp(`\\bALTER_TABLE_ADD_COLUMN_BEGIN\\s*\\(\\s*(${identifier})\\s*,\\s*(${identifier})`, 'gi'))) {
+        if (!plain.slice(match.index!, match.index! + 5).trim()) { continue; }
+        added.push({ table: name(match[1]), column: name(match[2]), index: match.index! });
+    }
+    for (const match of code.matchAll(new RegExp(`\\bALTER\\s+TABLE\\s+(${identifier}(?:\\s*\\.\\s*${identifier})?)\\s+ADD\\s+(?:COLUMN\\s+)?`, 'gi'))) {
+        if (!plain.slice(match.index!, match.index! + 5).trim()) { continue; }
+        const start = match.index! + match[0].length;
+        const end = code[start] === '(' ? matching(code, start) : -1;
+        const body = end >= 0 ? code.slice(start + 1, end) : code.slice(start).split(/[;\r\n]/)[0];
+        let depth = 0, offset = 0;
+        for (let i = 0; i <= body.length; i++) {
+            if (body[i] === '(') { depth++; }
+            if (body[i] === ')') { depth--; }
+            if (i !== body.length && (body[i] !== ',' || depth !== 0)) { continue; }
+            const column = new RegExp(`^\\s*(${identifier})`).exec(body.slice(offset, i))?.[1];
+            if (column && !/^(?:constraint|primary|unique|foreign|check|partition|index)$/i.test(column)) {
+                added.push({ table: name(match[1].split('.').pop()!.trim()), column: name(column), index: match.index! });
+            }
+            offset = i + 1;
+        }
+    }
+    if (!added.length) { return []; }
+    // Documentation may be inline or delivered as a sibling .doc/.tdoc DDL artifact.
+    const layerRoot = path.resolve(path.dirname(file), '..');
+    const candidates = new Set<string>();
+    for (const table of new Set(added.map(column => column.table))) {
+        for (const extension of ['.doc', '.tdoc']) {
+            candidates.add(path.join(layerRoot, 'Documentation', table + extension));
+        }
+    }
+    for (const include of maskCode(text, false).matchAll(/^[ \t]*#[ \t]*include[ \t]+(?:<([^>\r\n]+)>|"([^"\r\n]+)")/gmi)) {
+        if (!/^[ \t]*#[ \t]*include\b/i.test(plain.slice(include.index!))) { continue; }
+        const target = include[1] ?? include[2];
+        if (!/\.(?:doc|tdoc)$/i.test(target)) { continue; }
+        candidates.add(path.resolve(path.dirname(file), target));
+        candidates.add(path.resolve(layerRoot, 'Documentation', target));
+    }
+    const sources = [text];
+    for (const candidate of candidates) {
+        const relative = path.relative(layerRoot, candidate);
+        if (path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) { continue; }
+        try { if (fs.statSync(candidate).isFile()) { sources.push(fs.readFileSync(candidate, 'utf8')); } } catch { /* Missing dependency remains undocumented. */ }
+    }
+    const documented = new Map<string, Set<string>>();
+    for (const documentation of sources) {
+        const docMask = maskCode(documentation);
+        const strings = triviaSpans(documentation).filter(span => span.kind === 'string');
+        for (const match of docMask.matchAll(/\bcreate\s+db\s+documentation\b/gi)) {
+            const start = match.index! + match[0].length;
+            const stop = /^\s*\/\s*$|[|;\[\]]/m.exec(docMask.slice(start));
+            const end = stop ? start + stop.index : documentation.length;
+            const fields = new Map<string, string>();
+            for (const field of docMask.slice(start, end).matchAll(/\b([a-z_$#][\w$#]*)\s*=/gi)) {
+                let valueStart = start + field.index! + field[0].length;
+                while (/\s/.test(documentation[valueStart] ?? '') && valueStart < end) { valueStart++; }
+                const literal = strings.find(span => span.start === valueStart);
+                if (literal) { fields.set(field[1].toLowerCase(), literal.text.slice(1, -1).trim()); }
+            }
+            const table = fields.get('table')?.toLowerCase();
+            if (table) {
+                const columns = documented.get(table) ?? new Set<string>();
+                for (const [column, description] of fields) { if (column !== 'table' && description) { columns.add(column); } }
+                documented.set(table, columns);
+            }
+        }
+    }
+    const seen = new Set<string>();
+    return added.flatMap(column => {
+        const key = `${column.table}.${column.column}`;
+        if (seen.has(key) || documented.get(column.table)?.has(column.column)) { return []; }
+        seen.add(key);
+        return [issueAt(file, text, column.index, vscode.DiagnosticSeverity.Error,
+            `Added column '${key}' requires a non-empty field description in this table's create db documentation`,
+            'database-added-column-documentation')];
+    });
+}
+
 function findProjectRoot(fileName: string): string | undefined {
     let current = path.dirname(fileName);
     for (let depth = 0; depth < 10; depth++) {
@@ -215,7 +298,7 @@ function isPluginObject(name: string): boolean {
 export function performDatabaseTableReview(document: ReviewDocument): McmdIssue[] {
     const text = document.getText();
     const file = document.fileName;
-    const issues: McmdIssue[] = [];
+    const issues: McmdIssue[] = checkAddedColumnDocumentation(text, file);
     const normalizedPath = normalizePath(file);
     const workspaceRoot = document.workspaceRoot || findProjectRoot(file);
     const actualBaseName = path.basename(file, path.extname(file));
